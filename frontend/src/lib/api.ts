@@ -7,21 +7,53 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T>(path: string, method = 'GET', body?: unknown, authToken = token): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`
   const res = await fetch(`/api${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    keepalive: method === 'POST',
   })
   if (!res.ok) throw new ApiError(res.status, `request failed: ${res.status}`)
+  if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
 export function clearToken() {
   token = null
+}
+
+/** For work that must outlive the session, like an SOS that finishes after quick exit. */
+export function sessionToken() {
+  return token
+}
+
+export interface Location {
+  lat: number
+  lng: number
+  accuracy: number | null
+}
+
+export interface ContactInput {
+  name: string
+  phone: string | null
+  email: string | null
+  channel: 'sms' | 'email'
+}
+
+export interface Contact extends ContactInput {
+  id: string
+}
+
+export interface SosHistoryItem {
+  created_at: string
+  trigger: string
+  status: string
+  delivered: number
+  undelivered: number
 }
 
 export const api = {
@@ -42,5 +74,35 @@ export const api = {
 
   me() {
     return request<{ account_id: string; created_at: string }>('/me')
+  },
+
+  contacts() {
+    return request<Contact[]>('/contacts')
+  },
+  createContact(input: ContactInput) {
+    return request<Contact>('/contacts', 'POST', input)
+  },
+  updateContact(id: string, input: ContactInput) {
+    return request<Contact>(`/contacts/${id}`, 'PUT', input)
+  },
+  deleteContact(id: string) {
+    return request<void>(`/contacts/${id}`, 'DELETE')
+  },
+
+  profile() {
+    return request<{ alert_name: string }>('/profile')
+  },
+  saveProfile(alertName: string) {
+    return request<{ alert_name: string }>('/profile', 'PUT', { alert_name: alertName })
+  },
+
+  sos(authToken: string | null, clientTs: string, battery: number | null) {
+    return request<{ accepted: boolean }>('/sos', 'POST', { client_ts: clientTs, battery }, authToken)
+  },
+  sosContext(authToken: string | null, location: Location, battery: number | null) {
+    return request<void>('/sos/context', 'POST', { location, battery }, authToken)
+  },
+  sosHistory() {
+    return request<SosHistoryItem[]>('/sos/history')
   },
 }

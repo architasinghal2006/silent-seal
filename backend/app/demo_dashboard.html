@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Received alerts (demo)</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --muted: light-dark(#595959, #b0b0b0); --bad: light-dark(#b71c1c, #ff8a80); --ok: light-dark(#1b6e37, #6fdc95); }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; max-width: 860px; padding: 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .note, .meta { color: var(--muted); font-size: 13px; }
+  form { display: flex; gap: 8px; margin: 16px 0; }
+  input { flex: 1; min-width: 0; padding: 8px; font: inherit; }
+  button { padding: 8px 14px; font: inherit; }
+  article { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; }
+  h2 { font-size: 16px; margin: 0; }
+  ul { list-style: none; margin: 10px 0 0; padding: 0; }
+  li { border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 10px; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 6px 0 0; }
+  .sent { color: var(--ok); } .failed, .stub { color: var(--bad); }
+  .error { color: var(--bad); }
+</style>
+</head>
+<body>
+<h1>Received alerts (demo)</h1>
+<p class="note">What trusted contacts would receive. Demo data only. Refreshes every 3 seconds.</p>
+<form id="auth">
+  <input id="token" type="password" placeholder="DEMO_DASHBOARD_TOKEN from .env" autocomplete="off" aria-label="Demo token">
+  <button>Show alerts</button>
+</form>
+<p id="state" class="note" role="status"></p>
+<div id="alerts"></div>
+<script>
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag)
+    if (cls) n.className = cls
+    if (text !== undefined) n.textContent = text
+    return n
+  }
+  const token = document.getElementById('token')
+  const state = document.getElementById('state')
+  const list = document.getElementById('alerts')
+  let timer
+
+  function render(alerts) {
+    list.replaceChildren(...alerts.map((a) => {
+      const card = el('article')
+      card.append(el('h2', '', `${a.trigger.toUpperCase()} SOS: ${new Date(a.created_at).toLocaleString()}`))
+      const loc = a.payload.location
+      const facts = [
+        `status: ${a.status}`,
+        loc ? `location: ${loc.lat}, ${loc.lng}${loc.accuracy != null ? ` (within ${Math.round(loc.accuracy)} m)` : ''}` : 'location: none yet',
+        a.payload.battery != null ? `battery: ${Math.round(a.payload.battery * 100)}%` : 'battery: unknown',
+      ]
+      card.append(el('div', 'meta', facts.join(' · ')))
+      const ul = el('ul')
+      if (!a.deliveries.length) ul.append(el('li', 'failed', 'Nobody was alerted: no trusted contacts.'))
+      for (const d of a.deliveries) {
+        const li = el('li')
+        li.append(el('strong', '', d.contact_name), document.createTextNode(` ${d.channel} ${d.destination} `))
+        li.append(el('span', d.status, `[${d.kind}, ${d.adapter}: ${d.status}${d.detail ? `, ${d.detail}` : ''}]`))
+        li.append(el('pre', '', d.body))
+        ul.append(li)
+      }
+      card.append(ul)
+      return card
+    }))
+    state.textContent = alerts.length ? '' : 'No alerts yet.'
+    state.className = 'note'
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/api/demo/alerts', { headers: { 'X-Demo-Token': token.value } })
+      if (res.status === 401) {
+        clearInterval(timer)
+        state.textContent = 'That token is not correct. Check DEMO_DASHBOARD_TOKEN in .env.'
+        state.className = 'error'
+        list.replaceChildren()
+        return
+      }
+      if (!res.ok) throw new Error(String(res.status))
+      render(await res.json())
+    } catch {
+      state.textContent = 'Could not reach the server. Retrying…'
+      state.className = 'error'
+    }
+  }
+
+  document.getElementById('auth').addEventListener('submit', (e) => {
+    e.preventDefault()
+    clearInterval(timer)
+    load()
+    timer = setInterval(load, 3000)
+  })
+</script>
+</body>
+</html>

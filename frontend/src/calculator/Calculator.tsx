@@ -41,6 +41,8 @@ export function Calculator({ hasAccount, onSetupRequested, onPinAttempt }: Props
   const stateRef = useRef(state)
   const pinModeRef = useRef(pinMode)
   const busy = useRef(false)
+  // Kept apart from the expression, which collapses leading zeros (a PIN can be 0123).
+  const pinDigits = useRef('')
   stateRef.current = state
   pinModeRef.current = pinMode
 
@@ -57,7 +59,7 @@ export function Calculator({ hasAccount, onSetupRequested, onPinAttempt }: Props
 
       if (key === '=' && pinModeRef.current) {
         setPinMode(false)
-        const pin = s.justEvaluated ? '' : s.expr
+        const pin = pinDigits.current
         if (/^\d{4,8}$/.test(pin)) {
           busy.current = true
           const ok = await onPinAttempt(pin).catch(() => false)
@@ -73,6 +75,7 @@ export function Calculator({ hasAccount, onSetupRequested, onPinAttempt }: Props
 
       if (key === '=' && !s.justEvaluated && s.expr === UNLOCK_SEQUENCE) {
         setState(press(s, '='))
+        pinDigits.current = ''
         if (hasAccount) setPinMode(true)
         else onSetupRequested()
         return
@@ -80,6 +83,7 @@ export function Calculator({ hasAccount, onSetupRequested, onPinAttempt }: Props
 
       // Anything that isn't number entry means the person is just calculating.
       if (pinModeRef.current && !isDigit(key) && key !== '⌫') setPinMode(false)
+      if (pinModeRef.current) pinDigits.current = key === '⌫' ? pinDigits.current.slice(0, -1) : pinDigits.current + key
       setState(press(s, key))
     },
     [hasAccount, onPinAttempt, onSetupRequested],

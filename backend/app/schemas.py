@@ -1,8 +1,11 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PIN_PATTERN = r"^\d{4,8}$"
+PHONE_PATTERN = r"^\+?\d{7,15}$"
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 
 
 class SetupRequest(BaseModel):
@@ -40,3 +43,54 @@ class MeResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     db: str
+
+
+class ProfileBody(BaseModel):
+    alert_name: str = Field(default="", max_length=80)
+
+
+class ContactBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    phone: str | None = Field(default=None, pattern=PHONE_PATTERN)
+    email: str | None = Field(default=None, pattern=EMAIL_PATTERN, max_length=254)
+    channel: Literal["sms", "email"]
+
+    @model_validator(mode="after")
+    def channel_has_destination(self) -> "ContactBody":
+        if self.channel == "sms" and not self.phone:
+            raise ValueError("sms contacts need a phone number")
+        if self.channel == "email" and not self.email:
+            raise ValueError("email contacts need an email address")
+        return self
+
+
+class ContactOut(ContactBody):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+
+
+class Location(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    accuracy: float | None = Field(default=None, ge=0)
+
+
+class SosRequest(BaseModel):
+    trigger: Literal["manual"] = "manual"
+    client_ts: datetime | None = None
+    battery: float | None = Field(default=None, ge=0, le=1)
+    location: Location | None = None
+
+
+class SosContext(BaseModel):
+    location: Location | None = None
+    battery: float | None = Field(default=None, ge=0, le=1)
+
+
+class SosHistoryItem(BaseModel):
+    created_at: datetime
+    trigger: str
+    status: str
+    delivered: int
+    undelivered: int

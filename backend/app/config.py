@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,8 +18,22 @@ class Settings(BaseSettings):
     max_failed_attempts: int = 5
     lockout_seconds: int = 60
 
-    # Notification adapter (Phase B): mock | sms | email
-    notify_adapter: str = "mock"
+    # Notification adapter. Mock logs and shows in the demo dashboard; sms and email are stubs.
+    notify_adapter: Literal["mock", "sms", "email"] = "mock"
+
+    # SMS stub: msg91 | twilio
+    sms_provider: str = ""
+    msg91_auth_key: str = ""
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+
+    # SMTP stub
+    smtp_host: str = ""
+    smtp_user: str = ""
+    smtp_password: str = ""
+
+    # Received-alerts demo dashboard. Empty disables it (404). Never enable with real data.
+    demo_dashboard_token: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:

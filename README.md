@@ -56,14 +56,33 @@ Then run the frontend with `npm run dev` as above. Compose reads `.env` and poin
 
 Keyboard works too: digits, `+ - * /`, `Enter` for `=`, `Backspace`. Tapping the display deletes one digit.
 
+If the database is reset, this browser still holds the old account and unlocking will fail. Clear the site data for `localhost:5173` and run setup again.
+
+## Demo walkthrough (Phase B)
+
+1. Set `DEMO_DASHBOARD_TOKEN` in `.env` and restart the backend. Open http://localhost:8000/api/demo/dashboard and enter that token. Keep this tab beside the app.
+2. Unlock with the real PIN. Tap **Allow location** if it appears. Silent alerts can never show a permission prompt, so location has to be allowed here first.
+3. Open **Trusted contacts**, enter your name in alerts and add a dummy contact or two.
+4. Back on the home screen, tap the red button briefly. Nothing happens. Then **hold it for 2 seconds**. The app returns to the calculator with no message, and the dashboard shows the alert followed by a location update.
+5. Unlock again. **Recent alerts** shows who was reached.
+6. Unlock with the duress PIN. The app shows no contacts or history, while the dashboard shows a `DURESS` alert sent to the real contacts, with the location following.
+
+Alerts are not really sent yet. The default `mock` adapter logs to the backend console and fills the dashboard. Setting `NOTIFY_ADAPTER=sms` or `email` selects a stub that checks its configuration and sends nothing; those attempts show as `stub` or `failed`, never `sent`.
+
+### How duress stays hidden
+
+- The client cannot tell real from duress, so it behaves the same after every unlock, including sending its location. The server keeps that location only if a recent SOS is missing one, and discards it after a normal unlock.
+- A duress session sees empty lists and cannot read, edit or delete real contacts. Contacts added under duress are stored as decoys and never receive alerts.
+- Alerts tell contacts not to call or text back, and duress alerts warn that someone may be forcing the unlock.
+
 ## Tests
 
 ```bash
-cd backend  && pytest -q        # auth, duress SOS, lockout, health
+cd backend  && pytest -q        # auth, duress, lockout, contacts, SOS dispatch, adapters, dashboard
 cd frontend && npm test         # calculator engine
 ```
 
-## API (Phase A)
+## API
 
 | Method | Path | Notes |
 |---|---|---|
@@ -71,6 +90,13 @@ cd frontend && npm test         # calculator engine
 | POST | `/api/auth/setup` | `{real_pin, duress_pin}` → `{account_id}`. PINs are 4–8 digits and must differ. |
 | POST | `/api/auth/unlock` | `{account_id, pin}` → `{token, expires_in}`. The duress PIN returns the same shape and silently records an SOS. Any failure returns `401 {"detail":"invalid"}`. |
 | GET | `/api/me` | Bearer token |
+| GET, POST | `/api/contacts` | Trusted contacts: name, phone or email, channel (`sms`/`email`) |
+| PUT, DELETE | `/api/contacts/{id}` | A duress session gets `404` for real contacts |
+| GET, PUT | `/api/profile` | `{alert_name}`, the name contacts see |
+| POST | `/api/sos` | `{client_ts, battery, location}` → `202`. Alerts all real contacts. |
+| POST | `/api/sos/context` | `{location, battery}` → `204`. Completes a recent SOS, otherwise discarded. |
+| GET | `/api/sos/history` | Last 10 alerts and outcomes. Always empty for a duress session. |
+| GET | `/api/demo/dashboard`, `/api/demo/alerts` | Demo only. `404` unless `DEMO_DASHBOARD_TOKEN` is set. |
 
 PINs are hashed with scrypt. Both hashes are always checked so response timing does not reveal which PIN matched. The JWT carries an opaque scope (`a`/`b`), never the word "duress".
 
@@ -78,17 +104,19 @@ PINs are hashed with scrypt. Both hashes are always checked so response timing d
 
 ```
 backend/   FastAPI + SQLAlchemy (SQLite locally, Postgres in Docker)
-  app/routers/    health, auth
-  app/services/   sos (dispatch adapters arrive in Phase B)
+  app/routers/       health, auth, contacts, sos, demo
+  app/services/      sos capture and dispatch
+  app/notifications/ mock adapter, SMS and SMTP stubs
 frontend/  React + Vite + TS PWA (manifest name "Calculator")
   src/calculator/ eval-free calculator engine + hidden unlock
-  src/screens/    Setup, Home
+  src/screens/    Setup, Home, Contacts
+  src/lib/        api, device capture (GPS, battery), sos
 ```
 
 ## Roadmap
 
 - [x] **A**: scaffold, health, real/duress PIN auth, decoy calculator with secret unlock
-- [ ] **B**: trusted contacts, SOS engine with notification adapters (mock/SMS/email), GPS, received-alerts dashboard
+- [x] **B**: trusted contacts, SOS engine with notification adapters (mock, SMS and email stubs), GPS and battery capture, received-alerts dashboard. SOS audio moves to Phase D, where it can be encrypted.
 - [ ] **C**: live location share with expiring link, breadcrumb map, "I'm safe"
 - [ ] **D**: client-side encrypted evidence vault, hash chain, export
 - [ ] **E**: geofencing, offline queue, panic wipe, PWA install polish

@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -8,7 +8,7 @@ from ..db import get_db
 from ..models import Account, utcnow
 from ..schemas import MeResponse, SetupRequest, SetupResponse, UnlockRequest, UnlockResponse
 from ..security import DUMMY_HASH, SessionCtx, create_token, current_session, hash_pin, verify_pin
-from ..services.sos import record_sos
+from ..services.sos import dispatch_sos, record_sos
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -25,7 +25,7 @@ def setup(body: SetupRequest, db: Session = Depends(get_db)) -> SetupResponse:
 
 
 @router.post("/auth/unlock", response_model=UnlockResponse)
-def unlock(body: UnlockRequest, db: Session = Depends(get_db)) -> UnlockResponse:
+def unlock(body: UnlockRequest, background: BackgroundTasks, db: Session = Depends(get_db)) -> UnlockResponse:
     settings = get_settings()
     account = db.get(Account, body.account_id)
     if account is None:
@@ -54,7 +54,9 @@ def unlock(body: UnlockRequest, db: Session = Depends(get_db)) -> UnlockResponse
     db.commit()
 
     if duress_ok:
-        record_sos(db, account.id, trigger="duress")
+        # Sent after the response so delivery time cannot distinguish this from a real unlock.
+        event = record_sos(db, account.id, trigger="duress")
+        background.add_task(dispatch_sos, event.id)
 
     token, ttl = create_token(account.id, duress=duress_ok)
     return UnlockResponse(token=token, expires_in=ttl)

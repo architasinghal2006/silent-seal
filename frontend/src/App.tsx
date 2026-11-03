@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Calculator } from './calculator/Calculator'
 import { IDLE_LOCK_MS } from './config'
 import { api, clearToken } from './lib/api'
+import { sendUnlockContext } from './lib/sos'
 import { getAccountId } from './lib/storage'
+import { Contacts } from './screens/Contacts'
 import { Home } from './screens/Home'
 import { Setup } from './screens/Setup'
 
-type View = 'calc' | 'setup' | 'app'
+type View = 'calc' | 'setup' | 'app' | 'contacts'
 
 /**
  * While anything other than the calculator is visible, return to the calculator on
@@ -49,7 +51,10 @@ export default function App() {
     async (pin: string) => {
       if (!accountId) return false
       const ok = await api.unlock(accountId, pin)
-      if (ok) setView('app')
+      if (ok) {
+        sendUnlockContext()
+        setView('app')
+      }
       return ok
     },
     [accountId],
@@ -61,7 +66,8 @@ export default function App() {
   }, [])
 
   if (view === 'setup') return <Setup onDone={onSetupDone} onExit={lock} />
-  if (view === 'app') return <Home onExit={lock} />
+  if (view === 'app') return <Home onExit={lock} onContacts={() => setView('contacts')} />
+  if (view === 'contacts') return <Contacts onBack={() => setView('app')} onExit={lock} />
   return (
     <Calculator
       hasAccount={Boolean(accountId)}
