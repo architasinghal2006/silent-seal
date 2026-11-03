@@ -4,6 +4,7 @@ const KEY = 'calc.prefs'
 interface Prefs {
   precision: number
   k?: string // account id
+  s?: string // location stream token, so sharing resumes if the app is reopened
 }
 
 function read(): Prefs {
@@ -30,4 +31,12 @@ export function getAccountId(): string | undefined {
 
 export function setAccountId(id: string) {
   write({ ...read(), k: id })
+}
+
+export function getStreamToken(): string | undefined {
+  return read().s
+}
+
+export function setStreamToken(token: string | undefined) {
+  write({ ...read(), s: token })
 }

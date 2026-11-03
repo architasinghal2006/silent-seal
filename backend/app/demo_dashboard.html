@@ -44,6 +44,22 @@
   const list = document.getElementById('alerts')
   let timer
 
+  function linkified(body) {
+    const pre = el('pre')
+    for (const part of body.split(/(https?:\/\/\S+)/)) {
+      if (/^https?:\/\//.test(part)) {
+        const a = el('a', '', part)
+        a.href = part
+        a.target = '_blank'
+        a.rel = 'noreferrer'
+        pre.append(a)
+      } else {
+        pre.append(document.createTextNode(part))
+      }
+    }
+    return pre
+  }
+
   function render(alerts) {
     list.replaceChildren(...alerts.map((a) => {
       const card = el('article')
@@ -61,7 +77,7 @@
         const li = el('li')
         li.append(el('strong', '', d.contact_name), document.createTextNode(` ${d.channel} ${d.destination} `))
         li.append(el('span', d.status, `[${d.kind}, ${d.adapter}: ${d.status}${d.detail ? `, ${d.detail}` : ''}]`))
-        li.append(el('pre', '', d.body))
+        li.append(linkified(d.body))
         ul.append(li)
       }
       card.append(ul)

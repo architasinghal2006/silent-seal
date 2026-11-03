@@ -281,3 +281,10 @@ code {
   font-size: 16px;
   letter-spacing: normal;
 }
+
+/* ---------- Live share ---------- */
+
+.live-card { border: 1px solid var(--warning); }
+.live-card h2 { margin-bottom: 4px; }
+.live-card p { margin: 0 0 12px; }
+.live-actions { display: flex; flex-wrap: wrap; gap: 8px; }

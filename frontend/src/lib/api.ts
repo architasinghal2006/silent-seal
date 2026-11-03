@@ -56,6 +56,11 @@ export interface SosHistoryItem {
   undelivered: number
 }
 
+export interface StreamReply {
+  stream: boolean
+  stream_token: string | null
+}
+
 export const api = {
   async setup(realPin: string, duressPin: string) {
     return request<{ account_id: string }>('/auth/setup', 'POST', { real_pin: realPin, duress_pin: duressPin })
@@ -99,8 +104,17 @@ export const api = {
   sos(authToken: string | null, clientTs: string, battery: number | null) {
     return request<{ accepted: boolean }>('/sos', 'POST', { client_ts: clientTs, battery }, authToken)
   },
-  sosContext(authToken: string | null, location: Location, battery: number | null) {
-    return request<void>('/sos/context', 'POST', { location, battery }, authToken)
+  sosContext(authToken: string | null, location: Location | null, battery: number | null) {
+    return request<StreamReply>('/sos/context', 'POST', { location, battery }, authToken)
+  },
+  livePoint(streamToken: string, location: Location | null) {
+    return request<StreamReply>('/live/point', 'POST', { location }, streamToken)
+  },
+  liveStatus() {
+    return request<{ active: boolean; expires_at: string | null }>('/live/status')
+  },
+  imSafe() {
+    return request<void>('/live/safe', 'POST')
   },
   sosHistory() {
     return request<SosHistoryItem[]>('/sos/history')

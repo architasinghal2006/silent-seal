@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Delivery, SosEvent
+from app.models import Breadcrumb, Delivery, LiveShare, SosEvent
 from app.notifications.adapters import Notification, SmsStubAdapter, SmtpStubAdapter
 
 SMS = {"name": "Asha (dummy)", "phone": "+919800000001", "channel": "sms"}
@@ -117,7 +117,7 @@ def test_duress_alerts_real_contacts_then_adds_location(client, account, real):
     first = _deliveries(event.id)
     assert len(first) == 1 and "duress PIN" in first[0].body
 
-    assert client.post("/api/sos/context", json={"location": LOCATION, "battery": 0.5}, headers=duress).status_code == 204
+    assert client.post("/api/sos/context", json={"location": LOCATION, "battery": 0.5}, headers=duress).status_code == 200
     after = _deliveries(event.id)
     assert [d.kind for d in after] == ["initial", "update"]
     assert "mlat=28.6139" in after[1].body
@@ -128,8 +128,11 @@ def test_duress_alerts_real_contacts_then_adds_location(client, account, real):
 
 
 def test_real_unlock_context_is_discarded(client, account, real):
-    assert client.post("/api/sos/context", json={"location": LOCATION}, headers=real).status_code == 204
+    r = client.post("/api/sos/context", json={"location": LOCATION}, headers=real)
+    assert r.json() == {"stream": False, "stream_token": None}
     assert _events(account) == []
+    with SessionLocal() as db:
+        assert db.scalars(select(Breadcrumb).join(LiveShare).where(LiveShare.account_id == account)).first() is None
 
 
 def test_duress_session_sees_nothing_and_cannot_touch_real_data(client, account, real):

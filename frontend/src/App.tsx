@@ -4,6 +4,7 @@ import { IDLE_LOCK_MS } from './config'
 import { api, clearToken } from './lib/api'
 import { sendUnlockContext } from './lib/sos'
 import { getAccountId } from './lib/storage'
+import { resumeStream } from './lib/stream'
 import { Contacts } from './screens/Contacts'
 import { Home } from './screens/Home'
 import { Setup } from './screens/Setup'
@@ -46,6 +47,7 @@ export default function App() {
   }, [])
 
   useStealthGuards(view !== 'calc', lock)
+  useEffect(resumeStream, [])
 
   const onPinAttempt = useCallback(
     async (pin: string) => {

@@ -69,16 +69,29 @@ If the database is reset, this browser still holds the old account and unlocking
 
 Alerts are not really sent yet. The default `mock` adapter logs to the backend console and fills the dashboard. Setting `NOTIFY_ADAPTER=sms` or `email` selects a stub that checks its configuration and sends nothing; those attempts show as `stub` or `failed`, never `sent`.
 
+## Demo walkthrough (Phase C)
+
+1. Send an alert as in Phase B. In the dashboard, click the **Live map** link in the alert. This is what a contact sees.
+2. Leave the app on the calculator. The location keeps updating every 15 seconds and the map draws a trail. To see it move in Chrome, change the position under DevTools > Sensors.
+3. Reload the app. It stays on the calculator and sharing picks back up without a PIN.
+4. Unlock with the duress PIN. The app shows no sign of sharing and has no "I'm safe" button, and the map stays live.
+5. Unlock with the real PIN. A card says your contacts can see your location. Press **I'm safe** and confirm. The map stops showing any location, says they marked themselves safe, and contacts get a message.
+
+The link ends after `LIVE_SHARE_TTL_MINUTES` (default 120) if nobody ends it first. Set `PUBLIC_BASE_URL` to an address contacts can reach, because links to `localhost` only work on this computer.
+
+**Limit:** a web app can only send its location while it is open and the phone is awake. If the phone locks or the app is closed, updates pause, and the map warns the contact after 2 minutes without one. Sharing resumes when the app reopens.
+
 ### How duress stays hidden
 
-- The client cannot tell real from duress, so it behaves the same after every unlock, including sending its location. The server keeps that location only if a recent SOS is missing one, and discards it after a normal unlock.
+- The client cannot tell real from duress, so it behaves the same after every unlock, including sending its location. The server keeps that location only if an SOS is in progress, and discards it after a normal unlock. Its reply just says whether to keep streaming.
 - A duress session sees empty lists and cannot read, edit or delete real contacts. Contacts added under duress are stored as decoys and never receive alerts.
+- A duress session cannot see an active share, and "I'm safe" does nothing in one, so a forced unlock cannot cancel an SOS.
 - Alerts tell contacts not to call or text back, and duress alerts warn that someone may be forcing the unlock.
 
 ## Tests
 
 ```bash
-cd backend  && pytest -q        # auth, duress, lockout, contacts, SOS dispatch, adapters, dashboard
+cd backend  && pytest -q        # auth, duress, lockout, contacts, SOS dispatch, adapters, dashboard, live share
 cd frontend && npm test         # calculator engine
 ```
 
@@ -94,7 +107,11 @@ cd frontend && npm test         # calculator engine
 | PUT, DELETE | `/api/contacts/{id}` | A duress session gets `404` for real contacts |
 | GET, PUT | `/api/profile` | `{alert_name}`, the name contacts see |
 | POST | `/api/sos` | `{client_ts, battery, location}` → `202`. Alerts all real contacts. |
-| POST | `/api/sos/context` | `{location, battery}` → `204`. Completes a recent SOS, otherwise discarded. |
+| POST | `/api/sos/context` | `{location, battery}` → `{stream, stream_token}`. Stored only during an SOS, otherwise discarded. |
+| POST | `/api/live/point` | `{location}` → `{stream}`. Needs a stream token, which can do nothing else. |
+| GET | `/api/live/status` | Whether a share is active. Always inactive for a duress session. |
+| POST | `/api/live/safe` | "I'm safe": ends the share and tells contacts. Does nothing under duress. |
+| GET | `/api/share/{token}`, `/api/share/{token}/data` | The contact's private map. After a share ends, the data only says how it ended. |
 | GET | `/api/sos/history` | Last 10 alerts and outcomes. Always empty for a duress session. |
 | GET | `/api/demo/dashboard`, `/api/demo/alerts` | Demo only. `404` unless `DEMO_DASHBOARD_TOKEN` is set. |
 
@@ -104,19 +121,21 @@ PINs are hashed with scrypt. Both hashes are always checked so response timing d
 
 ```
 backend/   FastAPI + SQLAlchemy (SQLite locally, Postgres in Docker)
-  app/routers/       health, auth, contacts, sos, demo
-  app/services/      sos capture and dispatch
+  app/routers/       health, auth, contacts, sos, live, demo
+  app/services/      sos capture and dispatch, live shares
   app/notifications/ mock adapter, SMS and SMTP stubs
+  app/share_map.html contact's map, served by the API so the calculator bundle never mentions it
+  app/static/        vendored Leaflet 1.9.4
 frontend/  React + Vite + TS PWA (manifest name "Calculator")
   src/calculator/ eval-free calculator engine + hidden unlock
   src/screens/    Setup, Home, Contacts
-  src/lib/        api, device capture (GPS, battery), sos
+  src/lib/        api, device capture (GPS, battery), sos, location stream
 ```
 
 ## Roadmap
 
 - [x] **A**: scaffold, health, real/duress PIN auth, decoy calculator with secret unlock
 - [x] **B**: trusted contacts, SOS engine with notification adapters (mock, SMS and email stubs), GPS and battery capture, received-alerts dashboard. SOS audio moves to Phase D, where it can be encrypted.
-- [ ] **C**: live location share with expiring link, breadcrumb map, "I'm safe"
+- [x] **C**: live location share with expiring link, breadcrumb map, "I'm safe"
 - [ ] **D**: client-side encrypted evidence vault, hash chain, export
 - [ ] **E**: geofencing, offline queue, panic wipe, PWA install polish

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Delivery, SosEvent
-from ..schemas import SosContext, SosHistoryItem, SosRequest
-from ..security import SessionCtx, current_session
+from ..schemas import SosContext, SosHistoryItem, SosRequest, StreamReply
+from ..security import SessionCtx, create_stream_token, current_session
+from ..services.live import active_share, add_point
 from ..services.sos import attach_context, dispatch_sos, record_sos
 
 router = APIRouter(prefix="/api", tags=["sos"])
@@ -24,23 +25,29 @@ def fire_sos(
     return {"accepted": True}
 
 
-@router.post("/sos/context", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/sos/context", response_model=StreamReply)
 def sos_context(
     body: SosContext,
     background: BackgroundTasks,
     session: SessionCtx = Depends(current_session),
     db: Session = Depends(get_db),
-) -> Response:
+) -> StreamReply:
     """The client sends this after every unlock, because it cannot tell real from duress.
 
-    It is stored only if a recent SOS is missing a location. Otherwise it is discarded,
-    so a normal unlock leaves no location on the server.
+    It is stored only if an SOS is in progress. Otherwise it is discarded, so a normal
+    unlock leaves no location on the server. The reply says whether to keep streaming.
     """
+    share = active_share(db, session.account_id)
     if body.location is not None:
-        event_id = attach_context(db, session.account_id, body.location.model_dump(), body.battery)
+        location = body.location.model_dump()
+        event_id = attach_context(db, session.account_id, location, body.battery)
         if event_id:
             background.add_task(dispatch_sos, event_id, "update")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+        if share:
+            add_point(db, share, location)
+    if share is None:
+        return StreamReply(stream=False)
+    return StreamReply(stream=True, stream_token=create_stream_token(share.id, share.expires_at))
 
 
 @router.get("/sos/history", response_model=list[SosHistoryItem])

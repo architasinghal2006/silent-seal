@@ -6,8 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
-from ..models import Contact, Delivery, Profile, SosEvent, utcnow
+from ..models import Contact, Delivery, LiveShare, Profile, SosEvent, utcnow
 from ..notifications.adapters import Notification, get_adapter
+from .live import ensure_share, share_url
 
 log = logging.getLogger("silentseal.sos")
 
@@ -25,6 +26,7 @@ def record_sos(db: Session, account_id: str, trigger: str, payload: dict | None 
     )
     db.add(event)
     db.commit()
+    ensure_share(db, account_id, event.id)
     log.warning("SOS queued: event=%s account=%s trigger=%s", event.id, account_id, trigger)
     return event
 
@@ -49,10 +51,13 @@ def attach_context(db: Session, account_id: str, location: dict, battery: float 
     return recent.id
 
 
-def build_message(event: SosEvent, alert_name: str, kind: str) -> str:
+def build_message(event: SosEvent, alert_name: str, kind: str, map_url: str | None = None) -> str:
     payload = json.loads(event.payload) if event.payload else {}
     who = alert_name or "Someone who listed you as a trusted contact"
     when = event.created_at.replace(tzinfo=timezone.utc).astimezone(IST).strftime("%d %b %H:%M IST")
+
+    if kind == "safe":
+        return f"{who} has marked themselves safe and ended location sharing. If you are still worried, check on them carefully."
 
     if kind == "update":
         lines = [f"Location update for the silent SOS from {who} ({when})."]
@@ -61,6 +66,8 @@ def build_message(event: SosEvent, alert_name: str, kind: str) -> str:
         if event.trigger == "duress":
             lines.append("They used their duress PIN, so someone may be forcing them to unlock their phone.")
         lines.append("Do NOT call or text them: it may put them at risk.")
+        if map_url:
+            lines.append(f"Live map, private to you: {map_url}")
 
     location = payload.get("location")
     if location:
@@ -91,7 +98,8 @@ def _dispatch(db: Session, event_id: str, kind: str) -> None:
         select(Contact).where(Contact.account_id == event.account_id, Contact.decoy.is_(False))
     ).all()
     profile = db.get(Profile, event.account_id)
-    body = build_message(event, profile.alert_name if profile else "", kind)
+    share = db.scalars(select(LiveShare).where(LiveShare.account_id == event.account_id).order_by(LiveShare.created_at.desc())).first()
+    body = build_message(event, profile.alert_name if profile else "", kind, share_url(share.id) if share else None)
     adapter = get_adapter()
 
     delivered = 0
@@ -113,6 +121,6 @@ def _dispatch(db: Session, event_id: str, kind: str) -> None:
             )
         )
 
-    if kind == "initial" or delivered:
+    if kind == "initial" or (kind == "update" and delivered):
         event.status = "no_contacts" if not contacts else "dispatched" if delivered else "undelivered"
     db.commit()

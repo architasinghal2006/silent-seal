@@ -94,3 +94,15 @@ class SosHistoryItem(BaseModel):
     status: str
     delivered: int
     undelivered: int
+
+
+class StreamReply(BaseModel):
+    """Identical shape in real and duress sessions: the client just keeps streaming or stops."""
+
+    stream: bool
+    stream_token: str | None = None
+
+
+class LiveStatus(BaseModel):
+    active: bool
+    expires_at: datetime | None = None

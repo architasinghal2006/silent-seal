@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="origin">
+<title>Private location</title>
+<link rel="stylesheet" href="/api/share-assets/leaflet.css">
+<style>
+  :root { --ink: #1a1a1a; --soft: #4d4d4d; --line: #d9d9d9; --paper: #fff; --warn-bg: #fff4d6; --warn-ink: #5c4300; --act: #b3261e; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; height: 100dvh; background: var(--paper); color: var(--ink); font: 16px/1.4 system-ui, sans-serif; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 19px; overflow-wrap: anywhere; }
+  p { margin: 4px 0 0; }
+  .soft { color: var(--soft); font-size: 14px; }
+  .warn { padding: 8px 16px; background: var(--warn-bg); color: var(--warn-ink); font-size: 14px; }
+  #map { flex: 1; min-height: 0; }
+  .ended { flex: 1; padding: 24px 16px; max-width: 560px; }
+  .ended h1 { font-size: 22px; }
+  footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  footer p { flex: 1 1 180px; margin: 0; }
+  a.call { padding: 10px 16px; border-radius: 8px; background: var(--act); color: #fff; font-weight: 700; text-decoration: none; }
+  a.line { padding: 10px 12px; color: var(--ink); font-weight: 600; }
+  button { padding: 10px 12px; font: inherit; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Loading location…</h1>
+  <p id="updated" class="soft" role="status"></p>
+</header>
+<div id="stale" class="warn" role="alert" hidden></div>
+<div id="map" hidden></div>
+<section id="ended" class="ended" hidden>
+  <p id="ended-text"></p>
+</section>
+<footer>
+  <p class="soft" id="advice">Do not call or text them: it may put them at risk.</p>
+  <button id="recenter" type="button" hidden>Show latest</button>
+  <a class="line" href="tel:181">181 Women's Helpline</a>
+  <a class="call" href="tel:112">Call 112</a>
+</footer>
+<script src="/api/share-assets/leaflet.js"></script>
+<script>
+  const POLL_MS = 15000
+  const STALE_MS = 2 * 60000
+  const $ = (id) => document.getElementById(id)
+  let map, trail, marker, circle, timer
+  let follow = true
+  let latest = null
+
+  function ago(iso) {
+    const mins = Math.round((Date.now() - new Date(iso)) / 60000)
+    if (mins < 1) return 'just now'
+    return mins === 1 ? '1 minute ago' : mins < 120 ? `${mins} minutes ago` : `${Math.round(mins / 60)} hours ago`
+  }
+
+  function initMap() {
+    $('map').hidden = false
+    map = L.map('map')
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map)
+    trail = L.polyline([], { color: '#b3261e', weight: 4, opacity: 0.8 }).addTo(map)
+    circle = L.circle([0, 0], { radius: 0, color: '#b3261e', weight: 1, fillOpacity: 0.12 }).addTo(map)
+    marker = L.circleMarker([0, 0], { radius: 9, color: '#fff', weight: 3, fillColor: '#b3261e', fillOpacity: 1 }).addTo(map)
+    map.on('dragstart', () => {
+      follow = false
+      $('recenter').hidden = false
+    })
+  }
+
+  function showLatest() {
+    if (latest) map.setView([latest.lat, latest.lng], Math.max(map.getZoom() || 0, 16))
+  }
+
+  function renderActive(data) {
+    const who = data.name || 'Someone who trusts you'
+    $('title').textContent = `${who} has shared their location with you`
+    const until = new Date(data.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    if (!data.points.length) {
+      $('updated').textContent = `Waiting for their first location. This link ends at ${until}.`
+      return
+    }
+    if (!map) initMap()
+    latest = data.points[data.points.length - 1]
+    const here = [latest.lat, latest.lng]
+    trail.setLatLngs(data.points.map((p) => [p.lat, p.lng]))
+    marker.setLatLng(here)
+    circle.setLatLng(here).setRadius(latest.accuracy || 0)
+    if (follow) showLatest()
+    const accuracy = latest.accuracy != null ? `, within ${Math.round(latest.accuracy)} m` : ''
+    $('updated').textContent = `Last location ${ago(latest.at)}${accuracy}. This link ends at ${until}.`
+    const old = Date.now() - new Date(latest.at) > STALE_MS
+    $('stale').hidden = !old
+    if (old) $('stale').textContent = `No update since ${ago(latest.at)}. Their phone may be off, offline or locked, and they may have moved.`
+  }
+
+  function renderEnded(title, text) {
+    clearInterval(timer)
+    if (map) { map.remove(); map = null }
+    $('map').hidden = true
+    $('stale').hidden = true
+    $('recenter').hidden = true
+    $('ended').hidden = false
+    $('title').textContent = title
+    $('updated').textContent = ''
+    $('ended-text').textContent = text
+  }
+
+  async function load() {
+    try {
+      const res = await fetch(location.pathname + '/data', { cache: 'no-store' })
+      if (res.status === 404) {
+        return renderEnded('This link is not valid', 'Check that you opened the whole link from the alert. If you think someone is in danger, call 112.')
+      }
+      if (!res.ok) throw new Error(String(res.status))
+      const data = await res.json()
+      if (data.status === 'safe') {
+        $('advice').textContent = 'If you are still worried, check on them carefully.'
+        return renderEnded('They marked themselves safe', 'They ended location sharing, so this link no longer shows where they are.')
+      }
+      if (data.status === 'expired') {
+        return renderEnded('This link has expired', 'They did not mark themselves safe before it ended, and their location is no longer shown. If you think they are in danger, call 112.')
+      }
+      renderActive(data)
+    } catch {
+      $('updated').textContent = 'Could not refresh the location. Trying again…'
+    }
+  }
+
+  $('recenter').addEventListener('click', () => {
+    follow = true
+    $('recenter').hidden = true
+    showLatest()
+  })
+  load()
+  timer = setInterval(load, POLL_MS)
+</script>
+</body>
+</html>

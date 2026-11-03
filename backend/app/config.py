@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
 
+    # Live location share. The base URL is what contacts open, so it must be reachable by them.
+    public_base_url: str = "http://localhost:8000"
+    live_share_ttl_minutes: int = 120
+
     # Received-alerts demo dashboard. Empty disables it (404). Never enable with real data.
     demo_dashboard_token: str = ""
 

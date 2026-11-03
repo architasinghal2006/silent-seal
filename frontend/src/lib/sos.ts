@@ -1,9 +1,10 @@
 import { api, sessionToken } from './api'
 import { readBattery, readLocationSilently } from './device'
+import { startStream } from './stream'
 
 async function sendContext(token: string | null, battery: number | null) {
-  const location = await readLocationSilently()
-  if (location) await api.sosContext(token, location, battery)
+  const reply = await api.sosContext(token, await readLocationSilently(), battery)
+  if (reply.stream && reply.stream_token) startStream(reply.stream_token)
 }
 
 /**
@@ -22,8 +23,8 @@ export function fireSos() {
 }
 
 /**
- * Runs after every unlock because the client cannot tell real from duress. The server uses
- * this only to complete a recent SOS that has no location, and otherwise discards it.
+ * Runs after every unlock because the client cannot tell real from duress. The server keeps
+ * the location only if an SOS is in progress, and tells the client whether to keep streaming.
  */
 export function sendUnlockContext() {
   const token = sessionToken()

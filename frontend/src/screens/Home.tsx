@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Helplines } from '../components/Helplines'
+import { LiveShareCard } from '../components/LiveShareCard'
 import { QuickExit } from '../components/QuickExit'
 import { SosButton } from '../components/SosButton'
 import { api, type SosHistoryItem } from '../lib/api'
@@ -8,7 +9,6 @@ import { fireSos } from '../lib/sos'
 
 // Modules land in later phases; the tiles show what's coming.
 const COMING = [
-  { title: 'Live location', desc: 'Share a private, expiring map link.' },
   { title: 'Evidence vault', desc: 'Encrypted notes, photos and audio.' },
   { title: 'Safe & danger zones', desc: 'Automatic alerts by location.' },
 ]
@@ -45,11 +45,13 @@ export function Home({ onExit, onContacts }: { onExit: () => void; onContacts: (
       <h1>Silent Seal</h1>
       <p className="muted">Everything here is private to you. Press Exit or Esc any time to return to the calculator.</p>
 
+      <LiveShareCard />
+
       <section className="card">
         <SosButton onFire={sendAlert} />
         <p className="muted">
-          Hold for 2 seconds. Your trusted contacts get your location and battery level, with no sound or
-          message on this phone, and you return to the calculator.
+          Hold for 2 seconds. Your trusted contacts get a private live map of your location, with no sound
+          or message on this phone, and you return to the calculator.
         </p>
         {contactCount === 0 && (
           <p className="warning" role="status">
