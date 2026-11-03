@@ -288,3 +288,18 @@ code {
 .live-card h2 { margin-bottom: 4px; }
 .live-card p { margin: 0 0 12px; }
 .live-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---------- Evidence vault ---------- */
+
+.ok { color: #6fdc95; margin: 0; }
+.card[role='status'] .error { margin: 0; }
+.vault-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.entry-list { list-style: none; margin: 0 0 16px; padding: 0; }
+.entry { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.entry img { max-width: 100%; border-radius: 8px; }
+.entry audio { width: 100%; }
+.entry-text { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.form textarea { resize: vertical; font-family: inherit; }
+.form .check { flex-direction: row; align-items: flex-start; gap: 10px; }
+.form .check input { width: 20px; height: 20px; flex: none; margin: 1px 0 0; padding: 0; }
+.form p { margin: 0; }

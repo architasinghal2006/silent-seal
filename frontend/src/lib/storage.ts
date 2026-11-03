@@ -5,6 +5,7 @@ interface Prefs {
   precision: number
   k?: string // account id
   s?: string // location stream token, so sharing resumes if the app is reopened
+  a?: boolean // record audio with an SOS
 }
 
 function read(): Prefs {
@@ -39,4 +40,12 @@ export function getStreamToken(): string | undefined {
 
 export function setStreamToken(token: string | undefined) {
   write({ ...read(), s: token })
+}
+
+export function getSosAudio(): boolean {
+  return read().a === true
+}
+
+export function setSosAudio(on: boolean) {
+  write({ ...read(), a: on || undefined })
 }

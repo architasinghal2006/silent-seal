@@ -1,3 +1,5 @@
+import type { SealedClip, SealedEntry, VaultMeta } from './crypto'
+
 // The session token lives only in memory: closing, reloading or quick-exiting drops it.
 let token: string | null = null
 
@@ -15,7 +17,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, authToke
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
-    keepalive: method === 'POST',
+    keepalive: method === 'POST' && !path.startsWith('/vault'),
   })
   if (!res.ok) throw new ApiError(res.status, `request failed: ${res.status}`)
   if (res.status === 204) return undefined as T
@@ -60,6 +62,8 @@ export interface StreamReply {
   stream: boolean
   stream_token: string | null
 }
+
+export type VaultMetaReply = (VaultMeta & { configured: true }) | { configured: false }
 
 export const api = {
   async setup(realPin: string, duressPin: string) {
@@ -118,5 +122,30 @@ export const api = {
   },
   sosHistory() {
     return request<SosHistoryItem[]>('/sos/history')
+  },
+
+  vaultMeta(authToken = token) {
+    return request<VaultMetaReply>('/vault/meta', 'GET', undefined, authToken)
+  },
+  createVaultMeta(meta: VaultMeta) {
+    return request<{ configured: boolean }>('/vault/meta', 'PUT', meta)
+  },
+  vaultHead(authToken: string | null) {
+    return request<{ seq: number; hash: string }>('/vault/head', 'GET', undefined, authToken)
+  },
+  vaultEntries() {
+    return request<SealedEntry[]>('/vault/entries')
+  },
+  appendVaultEntry(authToken: string | null, entry: SealedEntry) {
+    return request<SealedEntry>('/vault/entries', 'POST', entry, authToken)
+  },
+  vaultClips() {
+    return request<(SealedClip & { id: string })[]>('/vault/clips')
+  },
+  addVaultClip(authToken: string | null, clip: SealedClip) {
+    return request<{ accepted: boolean }>('/vault/clips', 'POST', clip, authToken)
+  },
+  deleteVaultClip(id: string) {
+    return request<void>(`/vault/clips/${id}`, 'DELETE')
   },
 }

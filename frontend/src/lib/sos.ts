@@ -1,6 +1,7 @@
 import { api, sessionToken } from './api'
 import { readBattery, readLocationSilently } from './device'
 import { startStream } from './stream'
+import { captureSosAudio } from './vault'
 
 async function sendContext(token: string | null, battery: number | null) {
   const reply = await api.sosContext(token, await readLocationSilently(), battery)
@@ -18,6 +19,7 @@ export function fireSos() {
   void (async () => {
     const battery = await readBattery()
     await api.sos(token, clientTs, battery)
+    void captureSosAudio(token).catch(() => undefined)
     await sendContext(token, battery)
   })().catch(() => undefined)
 }

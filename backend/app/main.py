@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .db import Base, engine
-from .routers import auth, contacts, demo, health, live, sos
+from .routers import auth, contacts, demo, health, live, sos, vault
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -40,5 +40,6 @@ app.include_router(auth.router)
 app.include_router(contacts.router)
 app.include_router(sos.router)
 app.include_router(live.router)
+app.include_router(vault.router)
 app.include_router(demo.router)
 app.mount("/api/share-assets", StaticFiles(directory=Path(__file__).parent / "static"), name="share-assets")

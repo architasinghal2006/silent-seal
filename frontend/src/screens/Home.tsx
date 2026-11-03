@@ -9,7 +9,6 @@ import { fireSos } from '../lib/sos'
 
 // Modules land in later phases; the tiles show what's coming.
 const COMING = [
-  { title: 'Evidence vault', desc: 'Encrypted notes, photos and audio.' },
   { title: 'Safe & danger zones', desc: 'Automatic alerts by location.' },
 ]
 
@@ -22,7 +21,15 @@ function outcome(item: SosHistoryItem) {
   return `Sent to ${item.delivered} ${item.delivered === 1 ? 'contact' : 'contacts'}${failed}`
 }
 
-export function Home({ onExit, onContacts }: { onExit: () => void; onContacts: () => void }) {
+export function Home({
+  onExit,
+  onContacts,
+  onVault,
+}: {
+  onExit: () => void
+  onContacts: () => void
+  onVault: () => void
+}) {
   const [contactCount, setContactCount] = useState<number | null>(null)
   const [history, setHistory] = useState<SosHistoryItem[]>([])
   const [permission, setPermission] = useState<LocationPermission>('granted')
@@ -83,6 +90,10 @@ export function Home({ onExit, onContacts }: { onExit: () => void; onContacts: (
           <strong>Trusted contacts</strong>
           <span>People who receive your alerts.</span>
           <em>{contactCount === null ? '' : `${contactCount} added`}</em>
+        </button>
+        <button type="button" className="tile" onClick={onVault}>
+          <strong>Evidence vault</strong>
+          <span>Encrypted notes, photos and audio.</span>
         </button>
         {COMING.map((m) => (
           <button key={m.title} type="button" className="tile" disabled>

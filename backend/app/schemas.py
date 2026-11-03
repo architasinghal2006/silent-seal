@@ -1,7 +1,9 @@
+import base64
+import binascii
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 PIN_PATTERN = r"^\d{4,8}$"
 PHONE_PATTERN = r"^\+?\d{7,15}$"
@@ -106,3 +108,88 @@ class StreamReply(BaseModel):
 class LiveStatus(BaseModel):
     active: bool
     expires_at: datetime | None = None
+
+
+GENESIS_HASH = "0" * 64
+HASH_PATTERN = r"^[0-9a-f]{64}$"
+MAX_ENTRY_BASE64 = 16 * 1024 * 1024
+MAX_CLIP_BASE64 = 4 * 1024 * 1024
+
+
+def _is_base64(value: str) -> str:
+    try:
+        base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("must be base64")
+    return value
+
+
+def _is_iv(value: str) -> str:
+    if len(base64.b64decode(_is_base64(value))) != 12:
+        raise ValueError("must be a 12-byte IV")
+    return value
+
+
+Base64Text = Annotated[str, AfterValidator(_is_base64)]
+Iv = Annotated[str, Field(max_length=32), AfterValidator(_is_iv)]
+
+
+class VaultMetaBody(BaseModel):
+    salt: Annotated[Base64Text, Field(max_length=64)]
+    # 100k is a floor to refuse weak settings; the client's default is 600k.
+    iterations: int = Field(ge=100_000, le=10_000_000)
+    verifier_iv: Iv
+    verifier_ct: Annotated[Base64Text, Field(max_length=128)]
+    public_key: str = Field(max_length=2000)
+    private_iv: Iv
+    private_ct: Annotated[Base64Text, Field(max_length=8000)]
+
+
+class VaultMetaOut(BaseModel):
+    configured: bool
+    salt: str | None = None
+    iterations: int | None = None
+    verifier_iv: str | None = None
+    verifier_ct: str | None = None
+    public_key: str | None = None
+    private_iv: str | None = None
+    private_ct: str | None = None
+
+
+class VaultHead(BaseModel):
+    seq: int
+    hash: str
+
+
+class VaultEntryIn(BaseModel):
+    seq: int = Field(ge=1)
+    prev_hash: str = Field(pattern=HASH_PATTERN)
+    iv: Iv
+    ciphertext: Annotated[Base64Text, Field(max_length=MAX_ENTRY_BASE64)]
+    entry_hash: str = Field(pattern=HASH_PATTERN)
+
+
+class VaultEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    seq: int
+    prev_hash: str
+    iv: str
+    ciphertext: str
+    entry_hash: str
+    created_at: datetime
+
+
+class VaultClipIn(BaseModel):
+    iv: Iv
+    ciphertext: Annotated[Base64Text, Field(max_length=MAX_CLIP_BASE64)]
+    wrapped_key: Annotated[Base64Text, Field(max_length=1024)]
+
+
+class VaultClipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    iv: str
+    ciphertext: str
+    wrapped_key: str

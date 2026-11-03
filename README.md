@@ -12,7 +12,7 @@ Hackathon working model. All data is dummy or demo data.
 - **Plausible deniability.** The app installs as "Calculator" and works as one.
 - **Duress PIN.** Opens an empty app *and* silently fires an SOS. The server response is identical to a real unlock.
 - **Silent by default.** No sounds, toasts, vibration or notifications.
-- **Encryption at rest** (Phase D). AES-256-GCM in the browser, with the key derived from a passphrase separate from the PIN.
+- **Encryption at rest.** Evidence is encrypted with AES-256-GCM in the browser, with the key derived from a passphrase separate from the PIN. The server stores only ciphertext.
 - **Quick exit and auto-lock.** Exit button, `Esc`, switching away from the app and 5 minutes idle all return to the calculator and drop the in-memory session.
 
 ## Quick start (local, SQLite)
@@ -81,10 +81,37 @@ The link ends after `LIVE_SHARE_TTL_MINUTES` (default 120) if nobody ends it fir
 
 **Limit:** a web app can only send its location while it is open and the phone is awake. If the phone locks or the app is closed, updates pause, and the map warns the contact after 2 minutes without one. Sharing resumes when the app reopens.
 
+## Demo walkthrough (Phase D)
+
+1. Unlock with the real PIN and open **Evidence vault**. Create a passphrase, which must be separate from your PIN. It can't be recovered if forgotten.
+2. Add a note, a photo and an audio recording. Each saves your location and the time, and the app shows `Integrity check passed`.
+3. Press **Exit** while recording. The clip is still saved, and the vault is locked until you enter the passphrase again.
+4. Tick **Also record 10 seconds of audio**, go back and hold the alert button. Open the vault again and the clip appears as **Audio from an alert**.
+5. Press **Export encrypted copy**, then check it without the app:
+
+   ```bash
+   cd backend
+   python tools/verify_bundle.py path/to/calc-history-DATE.json          # hash chain only
+   python tools/verify_bundle.py path/to/calc-history-DATE.json --ask    # also decrypt
+   ```
+
+   Change one character inside any `ciphertext` in the file and run it again to see the check fail.
+6. Unlock with the duress PIN and open the vault. It looks like one that was never set up. A passphrase forced here opens a separate, empty vault.
+
+**How it works:** PBKDF2-SHA256 (600,000 rounds) turns the passphrase into an AES-256-GCM key that stays in memory and is dropped on lock. Type, text, media, time and location are all inside the ciphertext. Each entry's hash covers the previous hash, and its chain position is sealed into the encryption, so a server that recomputes every hash still fails when the entry is opened. SOS audio is sealed to an RSA public key, because the vault is usually locked during an alert, and joins the chain the next time it opens.
+
+**Limits, which matter if this is ever used as evidence:**
+
+- Removing the *newest* entries can't be detected, because nothing later links to them.
+- Times and locations come from the device, so they are not independent proof. Only the server's `created_at` was recorded by another party.
+- This shows the record is internally consistent. It is not a certified forensic process, and whether a court accepts it is a legal question.
+- Entries are capped at 8 MB. The whole vault downloads each time it opens, so a large vault will be slow on a low-end phone.
+
 ### How duress stays hidden
 
 - The client cannot tell real from duress, so it behaves the same after every unlock, including sending its location. The server keeps that location only if an SOS is in progress, and discards it after a normal unlock. Its reply just says whether to keep streaming.
 - A duress session sees empty lists and cannot read, edit or delete real contacts. Contacts added under duress are stored as decoys and never receive alerts.
+- A duress session has its own empty vault. Audio clips sent from one are discarded, so they can never be played back by whoever forced the unlock.
 - A duress session cannot see an active share, and "I'm safe" does nothing in one, so a forced unlock cannot cancel an SOS.
 - Alerts tell contacts not to call or text back, and duress alerts warn that someone may be forcing the unlock.
 
@@ -92,7 +119,7 @@ The link ends after `LIVE_SHARE_TTL_MINUTES` (default 120) if nobody ends it fir
 
 ```bash
 cd backend  && pytest -q        # auth, duress, lockout, contacts, SOS dispatch, adapters, dashboard, live share
-cd frontend && npm test         # calculator engine
+cd frontend && npm test         # calculator engine, vault crypto and hash chain
 ```
 
 ## API
@@ -113,6 +140,10 @@ cd frontend && npm test         # calculator engine
 | POST | `/api/live/safe` | "I'm safe": ends the share and tells contacts. Does nothing under duress. |
 | GET | `/api/share/{token}`, `/api/share/{token}/data` | The contact's private map. After a share ends, the data only says how it ended. |
 | GET | `/api/sos/history` | Last 10 alerts and outcomes. Always empty for a duress session. |
+| GET, PUT | `/api/vault/meta` | Salt, KDF settings and sealed keys. Each session sees only its own side. |
+| GET | `/api/vault/head`, `/api/vault/entries` | Chain head and ciphertext entries |
+| POST | `/api/vault/entries` | Append only. Must link to the head and match its hash. |
+| GET, POST, DELETE | `/api/vault/clips` | SOS audio waiting to join the chain. Discarded under duress. |
 | GET | `/api/demo/dashboard`, `/api/demo/alerts` | Demo only. `404` unless `DEMO_DASHBOARD_TOKEN` is set. |
 
 PINs are hashed with scrypt. Both hashes are always checked so response timing does not reveal which PIN matched. The JWT carries an opaque scope (`a`/`b`), never the word "duress".
@@ -121,15 +152,16 @@ PINs are hashed with scrypt. Both hashes are always checked so response timing d
 
 ```
 backend/   FastAPI + SQLAlchemy (SQLite locally, Postgres in Docker)
-  app/routers/       health, auth, contacts, sos, live, demo
+  app/routers/       health, auth, contacts, sos, live, vault, demo
   app/services/      sos capture and dispatch, live shares
   app/notifications/ mock adapter, SMS and SMTP stubs
   app/share_map.html contact's map, served by the API so the calculator bundle never mentions it
   app/static/        vendored Leaflet 1.9.4
+  tools/             verify_bundle.py, checks an export without the app
 frontend/  React + Vite + TS PWA (manifest name "Calculator")
   src/calculator/ eval-free calculator engine + hidden unlock
-  src/screens/    Setup, Home, Contacts
-  src/lib/        api, device capture (GPS, battery), sos, location stream
+  src/screens/    Setup, Home, Contacts, Vault
+  src/lib/        api, device capture (GPS, battery), sos, location stream, crypto, vault, recorder
 ```
 
 ## Roadmap
@@ -137,5 +169,5 @@ frontend/  React + Vite + TS PWA (manifest name "Calculator")
 - [x] **A**: scaffold, health, real/duress PIN auth, decoy calculator with secret unlock
 - [x] **B**: trusted contacts, SOS engine with notification adapters (mock, SMS and email stubs), GPS and battery capture, received-alerts dashboard. SOS audio moves to Phase D, where it can be encrypted.
 - [x] **C**: live location share with expiring link, breadcrumb map, "I'm safe"
-- [ ] **D**: client-side encrypted evidence vault, hash chain, export
+- [x] **D**: client-side encrypted evidence vault, hash chain, export, SOS audio
 - [ ] **E**: geofencing, offline queue, panic wipe, PWA install polish

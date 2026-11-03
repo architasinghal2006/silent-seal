@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -106,4 +106,52 @@ class Breadcrumb(Base):
     lat: Mapped[float] = mapped_column(Float)
     lng: Mapped[float] = mapped_column(Float)
     accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class VaultMeta(Base):
+    """What the device needs to re-derive its key. Holds no key. Duress gets its own row and vault."""
+
+    __tablename__ = "vault_meta"
+
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+    decoy: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    salt: Mapped[str] = mapped_column(String(64))
+    iterations: Mapped[int] = mapped_column(Integer)
+    verifier_iv: Mapped[str] = mapped_column(String(32))
+    verifier_ct: Mapped[str] = mapped_column(String(128))
+    public_key: Mapped[str] = mapped_column(Text)
+    private_iv: Mapped[str] = mapped_column(String(32))
+    private_ct: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class VaultEntry(Base):
+    """One link in the evidence hash chain. Only ciphertext: type, time and location are inside it."""
+
+    __tablename__ = "vault_entries"
+    __table_args__ = (UniqueConstraint("account_id", "decoy", "seq", name="uq_vault_chain_position"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    decoy: Mapped[bool] = mapped_column(Boolean)
+    seq: Mapped[int] = mapped_column(Integer)
+    prev_hash: Mapped[str] = mapped_column(String(64))
+    iv: Mapped[str] = mapped_column(String(32))
+    ciphertext: Mapped[str] = mapped_column(Text)
+    entry_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class VaultClip(Base):
+    """SOS audio sealed to the vault's public key, waiting to join the chain when the vault is next opened."""
+
+    __tablename__ = "vault_clips"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    decoy: Mapped[bool] = mapped_column(Boolean)
+    iv: Mapped[str] = mapped_column(String(32))
+    ciphertext: Mapped[str] = mapped_column(Text)
+    wrapped_key: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
