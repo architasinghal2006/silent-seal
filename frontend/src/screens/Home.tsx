@@ -2,15 +2,10 @@ import { useEffect, useState } from 'react'
 import { Helplines } from '../components/Helplines'
 import { LiveShareCard } from '../components/LiveShareCard'
 import { QuickExit } from '../components/QuickExit'
-import { SosButton } from '../components/SosButton'
+import { HoldButton } from '../components/HoldButton'
 import { api, type SosHistoryItem } from '../lib/api'
 import { locationPermission, requestLocationPermission, type LocationPermission } from '../lib/device'
 import { fireSos } from '../lib/sos'
-
-// Modules land in later phases; the tiles show what's coming.
-const COMING = [
-  { title: 'Safe & danger zones', desc: 'Automatic alerts by location.' },
-]
 
 const TRIGGER_LABEL: Record<string, string> = { manual: 'Alert', duress: 'Duress PIN', geofence: 'Zone' }
 
@@ -22,23 +17,32 @@ function outcome(item: SosHistoryItem) {
 }
 
 export function Home({
+  offline,
   onExit,
+  onWipe,
   onContacts,
   onVault,
+  onZones,
+  onSafety,
 }: {
+  offline: boolean
   onExit: () => void
+  onWipe: () => void
   onContacts: () => void
   onVault: () => void
+  onZones: () => void
+  onSafety: () => void
 }) {
   const [contactCount, setContactCount] = useState<number | null>(null)
   const [history, setHistory] = useState<SosHistoryItem[]>([])
   const [permission, setPermission] = useState<LocationPermission>('granted')
 
   useEffect(() => {
+    if (offline) return
     api.contacts().then((c) => setContactCount(c.length)).catch(() => undefined)
     api.sosHistory().then(setHistory).catch(() => undefined)
     locationPermission().then(setPermission)
-  }, [])
+  }, [offline])
 
   function sendAlert() {
     fireSos()
@@ -52,15 +56,25 @@ export function Home({
       <h1>Silent Seal</h1>
       <p className="muted">Everything here is private to you. Press Exit or Esc any time to return to the calculator.</p>
 
-      <LiveShareCard />
+      {offline ? (
+        <section className="card live-card" role="status">
+          <h2>You're offline</h2>
+          <p className="muted">
+            You can still send alerts and add evidence. They wait safely on this phone and go as soon as you're back
+            online. To see your contacts or your full vault, exit and unlock again once you have a connection.
+          </p>
+        </section>
+      ) : (
+        <LiveShareCard />
+      )}
 
       <section className="card">
-        <SosButton onFire={sendAlert} />
+        <HoldButton label="Hold to send silent alert" onFire={sendAlert} />
         <p className="muted">
           Hold for 2 seconds. Your trusted contacts get a private live map of your location, with no sound
           or message on this phone, and you return to the calculator.
         </p>
-        {contactCount === 0 && (
+        {!offline && contactCount === 0 && (
           <p className="warning" role="status">
             You have no trusted contacts yet, so an alert won't reach anyone.
           </p>
@@ -86,7 +100,7 @@ export function Home({
       </section>
 
       <div className="tiles">
-        <button type="button" className="tile" onClick={onContacts}>
+        <button type="button" className="tile" disabled={offline} onClick={onContacts}>
           <strong>Trusted contacts</strong>
           <span>People who receive your alerts.</span>
           <em>{contactCount === null ? '' : `${contactCount} added`}</em>
@@ -95,13 +109,14 @@ export function Home({
           <strong>Evidence vault</strong>
           <span>Encrypted notes, photos and audio.</span>
         </button>
-        {COMING.map((m) => (
-          <button key={m.title} type="button" className="tile" disabled>
-            <strong>{m.title}</strong>
-            <span>{m.desc}</span>
-            <em>Coming soon</em>
-          </button>
-        ))}
+        <button type="button" className="tile" disabled={offline} onClick={onZones}>
+          <strong>Safe & danger zones</strong>
+          <span>Automatic alerts by location.</span>
+        </button>
+        <button type="button" className="tile" disabled={offline} onClick={onSafety}>
+          <strong>Safety settings</strong>
+          <span>Recovery code and deleting your data.</span>
+        </button>
       </div>
 
       {history.length > 0 && (
@@ -121,6 +136,16 @@ export function Home({
       )}
 
       <Helplines />
+
+      <section className="card">
+        <h2>Panic wipe</h2>
+        <HoldButton label="Hold to wipe this phone" tone="quiet" onFire={onWipe} />
+        <p className="muted">
+          Hold for 2 seconds. This erases the app's data from this phone and returns to a fresh calculator, so anything
+          still waiting to send is lost and live location stops. Your evidence stays safe on the server, and you can get
+          back to it with your recovery code. Files you exported to Downloads have to be deleted separately.
+        </p>
+      </section>
     </main>
   )
 }

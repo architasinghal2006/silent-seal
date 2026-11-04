@@ -155,3 +155,29 @@ class VaultClip(Base):
     ciphertext: Mapped[str] = mapped_column(Text)
     wrapped_key: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Zone(Base):
+    """A safe or danger zone. Decoy zones belong to duress sessions and are never watched."""
+
+    __tablename__ = "zones"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    decoy: Mapped[bool] = mapped_column(Boolean, default=False)
+    name: Mapped[str] = mapped_column(String(80))
+    kind: Mapped[str] = mapped_column(String(10))  # danger | safe
+    lat: Mapped[float] = mapped_column(Float)
+    lng: Mapped[float] = mapped_column(Float)
+    radius: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class OfflineReceipt(Base):
+    """Marks a queued item as handled, so a retry after a lost reply doesn't alert contacts twice."""
+
+    __tablename__ = "offline_receipts"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -4,7 +4,7 @@ export const UNLOCK_SEQUENCE: string = (import.meta.env.VITE_UNLOCK_SEQUENCE as 
 /** Hidden PIN mode silently reverts to a plain calculator after this long. */
 export const PIN_MODE_TIMEOUT_MS = 30_000
 
-/** How often the location is sent while a share is active. */
+/** How often the location is sent while a share is active, and zones are checked. */
 export const STREAM_INTERVAL_MS = 15_000
 
 /** The real app locks itself back to the calculator after this much inactivity. */

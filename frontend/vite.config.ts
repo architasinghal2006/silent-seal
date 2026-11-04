@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg'],
+        includeAssets: ['icon.svg', 'icon-192.png', 'apple-touch-icon.png'],
         manifest: {
           // Neutral identity: on the home screen this is just a calculator.
           name: 'Calculator',
@@ -20,8 +20,17 @@ export default defineConfig(({ mode }) => {
           theme_color: '#000000',
           background_color: '#000000',
           display: 'standalone',
+          orientation: 'portrait',
+          id: '/',
           start_url: '/',
-          icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+          scope: '/',
+          categories: ['utilities'],
+          icons: [
+            { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+            { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+            { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+          ],
         },
         workbox: {
           navigateFallbackDenylist: [/^\/api/],

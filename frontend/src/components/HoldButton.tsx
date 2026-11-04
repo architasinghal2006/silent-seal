@@ -2,8 +2,8 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 
 const HOLD_MS = 2000
 
-/** Fires only after a sustained hold, so a stray tap cannot alert anyone. */
-export function SosButton({ onFire }: { onFire: () => void }) {
+/** Fires only after a sustained hold, so a stray tap cannot send an alert or wipe anything. */
+export function HoldButton({ label, tone = 'danger', onFire }: { label: string; tone?: 'danger' | 'quiet'; onFire: () => void }) {
   const [holding, setHolding] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -28,7 +28,7 @@ export function SosButton({ onFire }: { onFire: () => void }) {
   return (
     <button
       type="button"
-      className={holding ? 'sos-button sos-holding' : 'sos-button'}
+      className={`sos-button sos-${tone}${holding ? ' sos-holding' : ''}`}
       onPointerDown={start}
       onPointerUp={cancel}
       onPointerLeave={cancel}
@@ -44,7 +44,7 @@ export function SosButton({ onFire }: { onFire: () => void }) {
       onBlur={cancel}
     >
       <span className="sos-fill" aria-hidden="true" />
-      <span className="sos-label">Hold to send silent alert</span>
+      <span className="sos-label">{label}</span>
     </button>
   )
 }

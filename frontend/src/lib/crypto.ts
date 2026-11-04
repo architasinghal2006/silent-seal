@@ -73,7 +73,7 @@ export function fromBase64(text: string): Uint8Array {
   return bytes
 }
 
-async function deriveKey(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
+export async function deriveKey(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey('raw', encoder.encode(passphrase), 'PBKDF2', false, ['deriveKey'])
   return crypto.subtle.deriveKey(
     { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
@@ -89,13 +89,13 @@ function gcmParams(iv: Uint8Array, aad?: string): AesGcmParams {
   return aad === undefined ? { name: 'AES-GCM', iv } : { name: 'AES-GCM', iv, additionalData: encoder.encode(aad) }
 }
 
-async function seal(key: CryptoKey, plain: Uint8Array, aad?: string) {
+export async function seal(key: CryptoKey, plain: Uint8Array, aad?: string) {
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES))
   const ciphertext = await crypto.subtle.encrypt(gcmParams(iv, aad), key, plain)
   return { iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertext)) }
 }
 
-async function unseal(key: CryptoKey, iv: string, ciphertext: string, aad?: string): Promise<Uint8Array> {
+export async function unseal(key: CryptoKey, iv: string, ciphertext: string, aad?: string): Promise<Uint8Array> {
   const plain = await crypto.subtle.decrypt(gcmParams(fromBase64(iv), aad), key, fromBase64(ciphertext))
   return new Uint8Array(plain)
 }

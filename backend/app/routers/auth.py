@@ -1,13 +1,24 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
 from ..models import Account, utcnow
-from ..schemas import MeResponse, SetupRequest, SetupResponse, UnlockRequest, UnlockResponse
-from ..security import DUMMY_HASH, SessionCtx, create_token, current_session, hash_pin, verify_pin
+from ..schemas import EraseRequest, MeResponse, SetupRequest, SetupResponse, UnlockRequest, UnlockResponse
+from ..security import (
+    DUMMY_HASH,
+    SCOPE_DURESS,
+    SCOPE_FULL,
+    SessionCtx,
+    create_offline_token,
+    create_token,
+    current_session,
+    hash_pin,
+    verify_pin,
+)
+from ..services.erase import erase_account, erase_decoy_side
 from ..services.sos import dispatch_sos, record_sos
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -21,7 +32,11 @@ def setup(body: SetupRequest, db: Session = Depends(get_db)) -> SetupResponse:
     account = Account(real_pin_hash=hash_pin(body.real_pin), duress_pin_hash=hash_pin(body.duress_pin))
     db.add(account)
     db.commit()
-    return SetupResponse(account_id=account.id)
+    return SetupResponse(
+        account_id=account.id,
+        offline_real=create_offline_token(account.id, SCOPE_FULL),
+        offline_duress=create_offline_token(account.id, SCOPE_DURESS),
+    )
 
 
 @router.post("/auth/unlock", response_model=UnlockResponse)
@@ -68,3 +83,21 @@ def me(session: SessionCtx = Depends(current_session), db: Session = Depends(get
     if account is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unauthorized")
     return MeResponse(account_id=account.id, created_at=account.created_at)
+
+
+@router.post("/account/erase", status_code=status.HTTP_204_NO_CONTENT)
+def erase(
+    body: EraseRequest, session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)
+) -> Response:
+    """Real session: deletes everything. Duress session: looks the same but only clears its decoy side,
+    so nobody can destroy the evidence by forcing this."""
+    account = db.get(Account, session.account_id)
+    if account is None:
+        raise _DENIED
+    if not verify_pin(body.pin, account.duress_pin_hash if session.duress else account.real_pin_hash):
+        raise _DENIED
+    if session.duress:
+        erase_decoy_side(db, account.id)
+    else:
+        erase_account(db, account.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

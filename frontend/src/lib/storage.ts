@@ -1,11 +1,28 @@
+import type { WatchZone, ZoneState } from './geofence'
+
 // Device-local state lives under a key that looks like ordinary calculator preferences.
 const KEY = 'calc.prefs'
+
+export interface LocalRecord {
+  salt: string
+  iterations: number
+  iv: string
+  ct: string
+}
+
+export interface WatchData {
+  zones: WatchZone[]
+  token: string
+  states: Record<string, ZoneState>
+}
 
 interface Prefs {
   precision: number
   k?: string // account id
   s?: string // location stream token, so sharing resumes if the app is reopened
   a?: boolean // record audio with an SOS
+  o?: LocalRecord[] // PIN-sealed records for unlocking with no connection
+  g?: WatchData // zones the watcher follows
 }
 
 function read(): Prefs {
@@ -48,4 +65,20 @@ export function getSosAudio(): boolean {
 
 export function setSosAudio(on: boolean) {
   write({ ...read(), a: on || undefined })
+}
+
+export function getRecords(): LocalRecord[] {
+  return read().o ?? []
+}
+
+export function setRecords(records: LocalRecord[]) {
+  write({ ...read(), o: records })
+}
+
+export function getWatch(): WatchData | undefined {
+  return read().g
+}
+
+export function setWatch(data: WatchData | undefined) {
+  write({ ...read(), g: data })
 }

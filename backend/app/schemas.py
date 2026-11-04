@@ -23,6 +23,8 @@ class SetupRequest(BaseModel):
 
 class SetupResponse(BaseModel):
     account_id: str
+    offline_real: str
+    offline_duress: str
 
 
 class UnlockRequest(BaseModel):
@@ -193,3 +195,67 @@ class VaultClipOut(BaseModel):
     iv: str
     ciphertext: str
     wrapped_key: str
+
+
+class EraseRequest(BaseModel):
+    pin: str = Field(min_length=1, max_length=16)
+
+
+CLIENT_ID_PATTERN = r"^[0-9a-f]{16,64}$"
+
+
+class OfflineSos(BaseModel):
+    client_id: str = Field(pattern=CLIENT_ID_PATTERN)
+    trigger: Literal["manual", "geofence"] = "manual"
+    client_ts: datetime | None = None
+    battery: float | None = Field(default=None, ge=0, le=1)
+    location: Location | None = None
+    zone_event: Literal["entered", "left"] | None = None
+    trail: list[Location] = Field(default_factory=list, max_length=50)
+
+
+class OfflineUnlocked(BaseModel):
+    client_id: str = Field(pattern=CLIENT_ID_PATTERN)
+    client_ts: datetime | None = None
+    battery: float | None = Field(default=None, ge=0, le=1)
+    location: Location | None = None
+
+
+class OfflineClip(VaultClipIn):
+    client_id: str = Field(pattern=CLIENT_ID_PATTERN)
+    # Larger than an SOS clip: evidence added offline can be a photo.
+    ciphertext: Annotated[Base64Text, Field(max_length=MAX_ENTRY_BASE64)]
+
+
+class OfflineTokenReply(BaseModel):
+    token: str
+
+
+class ZoneBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    kind: Literal["danger", "safe"]
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    radius: int = Field(ge=50, le=5000)
+
+
+class ZoneOut(ZoneBody):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+
+
+class WatchZone(BaseModel):
+    """Short field names on purpose: this gets cached on the phone in plain sight."""
+
+    i: str
+    a: float
+    o: float
+    r: int
+    k: Literal["d", "s"]
+
+
+class ZoneList(BaseModel):
+    zones: list[ZoneOut]
+    watch: list[WatchZone]
+    watch_token: str | None = None

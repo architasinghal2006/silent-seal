@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +16,9 @@ IST = timezone(timedelta(hours=5, minutes=30), "IST")
 
 # How long after an SOS a late location from the device is still attached to it.
 CONTEXT_WINDOW = timedelta(minutes=10)
+
+# Past this, contacts are told the alert was held up, so they don't assume it's happening now.
+DELAY_NOTICE = timedelta(minutes=2)
 
 
 def record_sos(db: Session, account_id: str, trigger: str, payload: dict | None = None) -> SosEvent:
@@ -51,6 +54,18 @@ def attach_context(db: Session, account_id: str, location: dict, battery: float 
     return recent.id
 
 
+def _delayed_since(event: SosEvent, payload: dict) -> str | None:
+    """When the phone tried to send this, if that was a while before it reached us."""
+    raw = payload.get("client_ts")
+    if not raw:
+        return None
+    sent = datetime.fromisoformat(raw)
+    sent = sent if sent.tzinfo else sent.replace(tzinfo=timezone.utc)
+    if event.created_at.replace(tzinfo=timezone.utc) - sent < DELAY_NOTICE:
+        return None
+    return sent.astimezone(IST).strftime("%d %b %H:%M IST")
+
+
 def build_message(event: SosEvent, alert_name: str, kind: str, map_url: str | None = None) -> str:
     payload = json.loads(event.payload) if event.payload else {}
     who = alert_name or "Someone who listed you as a trusted contact"
@@ -63,9 +78,16 @@ def build_message(event: SosEvent, alert_name: str, kind: str, map_url: str | No
         lines = [f"Location update for the silent SOS from {who} ({when})."]
     else:
         lines = [f"SILENT SOS from {who} at {when}. They may need help."]
+        zone_event = payload.get("zone_event")
+        if zone_event:
+            place = "entered an area they marked as dangerous" if zone_event == "entered" else "left an area they marked as safe"
+            lines.append(f"Sent automatically: they {place}.")
         if event.trigger == "duress":
             lines.append("They used their duress PIN, so someone may be forcing them to unlock their phone.")
         lines.append("Do NOT call or text them: it may put them at risk.")
+        delayed_since = _delayed_since(event, payload)
+        if delayed_since:
+            lines.append(f"This alert was delayed because their phone was offline. It was sent at {delayed_since}.")
         if map_url:
             lines.append(f"Live map, private to you: {map_url}")
 

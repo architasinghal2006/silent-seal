@@ -1,4 +1,6 @@
 import { api, ApiError, sessionToken } from './api'
+import { enqueue, flushQueue, newClientId } from './queue'
+import { currentOfflineToken } from './session'
 import {
   findChainBreak,
   openClip,
@@ -55,6 +57,27 @@ export async function appendEntry(vault: VaultSession, envelope: Envelope) {
       // Another save got there first: seal again against the new head.
       if (!(e instanceof ApiError && e.status === 409) || attempt >= APPEND_RETRIES) throw e
     }
+  }
+}
+
+/** Seals evidence with only the public key and queues it. It joins the chain next time the vault opens. */
+export async function queueEvidence(publicKey: string, envelope: Envelope) {
+  const token = currentOfflineToken()
+  if (!token) throw new Error('no offline token')
+  const clip = await sealClip(publicKey, envelope)
+  await enqueue({ path: '/offline/clip', token, body: { client_id: newClientId(), ...clip } })
+  void flushQueue()
+}
+
+/** Saves to the chain, or if the connection has gone, holds it on the phone instead of losing it. */
+export async function saveEvidence(vault: VaultSession, envelope: Envelope): Promise<'saved' | 'queued'> {
+  try {
+    await appendEntry(vault, envelope)
+    return 'saved'
+  } catch (e) {
+    if (e instanceof ApiError && e.status < 500) throw e
+    await queueEvidence(vault.meta.public_key, envelope)
+    return 'queued'
   }
 }
 

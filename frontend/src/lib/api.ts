@@ -1,4 +1,5 @@
 import type { SealedClip, SealedEntry, VaultMeta } from './crypto'
+import type { WatchZone } from './geofence'
 
 // The session token lives only in memory: closing, reloading or quick-exiting drops it.
 let token: string | null = null
@@ -17,7 +18,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, authToke
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
-    keepalive: method === 'POST' && !path.startsWith('/vault'),
+    keepalive: method === 'POST' && !path.startsWith('/vault') && !path.startsWith('/offline'),
   })
   if (!res.ok) throw new ApiError(res.status, `request failed: ${res.status}`)
   if (res.status === 204) return undefined as T
@@ -63,21 +64,44 @@ export interface StreamReply {
   stream_token: string | null
 }
 
+export type UnlockResult = 'ok' | 'denied' | 'offline'
+
+export interface ZoneInput {
+  name: string
+  kind: 'danger' | 'safe'
+  lat: number
+  lng: number
+  radius: number
+}
+
+export interface Zone extends ZoneInput {
+  id: string
+}
+
+export interface ZoneList {
+  zones: Zone[]
+  watch: WatchZone[]
+  watch_token: string | null
+}
+
 export type VaultMetaReply = (VaultMeta & { configured: true }) | { configured: false }
 
 export const api = {
   async setup(realPin: string, duressPin: string) {
-    return request<{ account_id: string }>('/auth/setup', 'POST', { real_pin: realPin, duress_pin: duressPin })
+    return request<{ account_id: string; offline_real: string; offline_duress: string }>('/auth/setup', 'POST', {
+      real_pin: realPin,
+      duress_pin: duressPin,
+    })
   },
 
-  /** Resolves true when either PIN is accepted. Real vs duress is invisible to the client. */
-  async unlock(accountId: string, pin: string): Promise<boolean> {
+  /** 'ok' for either PIN: real vs duress is invisible to the client. No connection is 'offline'. */
+  async unlock(accountId: string, pin: string): Promise<UnlockResult> {
     try {
       const res = await request<{ token: string }>('/auth/unlock', 'POST', { account_id: accountId, pin })
       token = res.token
-      return true
-    } catch {
-      return false
+      return 'ok'
+    } catch (e) {
+      return e instanceof ApiError && e.status < 500 ? 'denied' : 'offline'
     }
   },
 
@@ -122,6 +146,26 @@ export const api = {
   },
   sosHistory() {
     return request<SosHistoryItem[]>('/sos/history')
+  },
+
+  zones(authToken = token) {
+    return request<ZoneList>('/zones', 'GET', undefined, authToken)
+  },
+  createZone(input: ZoneInput) {
+    return request<ZoneList>('/zones', 'POST', input)
+  },
+  deleteZone(id: string) {
+    return request<ZoneList>(`/zones/${id}`, 'DELETE')
+  },
+
+  sendQueued<T>(path: string, body: unknown, authToken: string) {
+    return request<T>(path, 'POST', body, authToken)
+  },
+  offlineToken(authToken: string | null) {
+    return request<{ token: string }>('/offline/token', 'GET', undefined, authToken)
+  },
+  eraseAccount(pin: string) {
+    return request<void>('/account/erase', 'POST', { pin })
   },
 
   vaultMeta(authToken = token) {

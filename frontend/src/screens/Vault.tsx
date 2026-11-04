@@ -5,14 +5,16 @@ import { createVault, fromBase64, openVault, type Envelope, type VaultMeta } fro
 import { readLocationSilently } from '../lib/device'
 import { pauseHideLock, resumeHideLock } from '../lib/guard'
 import { requestMicrophone, startRecording, stopStream, type ActiveRecorder } from '../lib/recorder'
+import { currentPublicKey, rememberPublicKey } from '../lib/session'
 import { getSosAudio, setSosAudio } from '../lib/storage'
 import {
-  appendEntry,
   blobToBase64,
   buildBundle,
   collectSosClips,
   currentVault,
   loadEntries,
+  queueEvidence,
+  saveEvidence,
   setVault,
   type OpenedVault,
   type VaultSession,
@@ -23,6 +25,8 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024
 const MAX_RECORDING_MS = 60_000
 
 const TYPE_LABEL = { text: 'Note', photo: 'Photo', audio: 'Audio' }
+
+const QUEUED_MESSAGE = "You're offline, so this is encrypted and waiting on this phone. It joins your vault when you're back online."
 
 function passphraseProblem(passphrase: string, confirm: string) {
   if (passphrase.length < MIN_PASSPHRASE) return `Use at least ${MIN_PASSPHRASE} characters.`
@@ -47,6 +51,7 @@ function CreateVault({ onOpen }: { onOpen: (vault: VaultSession) => void }) {
     try {
       const { meta, keys } = await createVault(passphrase)
       await api.createVaultMeta(meta)
+      void rememberPublicKey(meta.public_key).catch(() => undefined)
       onOpen(setVault(keys, meta))
     } catch {
       setError('Could not set up the vault. Check your connection and try again.')
@@ -201,7 +206,7 @@ function OpenVault({ vault }: { vault: VaultSession }) {
     recorder.current = null
     clearTimeout(autoStop.current)
     const { blob, mime } = await active.stop()
-    await appendEntry(vault, {
+    return saveEvidence(vault, {
       v: 1,
       type: 'audio',
       mime,
@@ -220,8 +225,9 @@ function OpenVault({ vault }: { vault: VaultSession }) {
     setInfo('')
     try {
       const location = await readLocationSilently()
-      await appendEntry(vault, { v: 1, capturedAt, location, ...envelope })
-      await refresh()
+      const outcome = await saveEvidence(vault, { v: 1, capturedAt, location, ...envelope })
+      if (outcome === 'queued') setInfo(QUEUED_MESSAGE)
+      else await refresh()
       return true
     } catch {
       setError('Could not save that. Check your connection and try again. Nothing was saved.')
@@ -277,8 +283,9 @@ function OpenVault({ vault }: { vault: VaultSession }) {
     setRecording(false)
     setBusy(true)
     try {
-      await finishRecording()
-      await refresh()
+      const outcome = await finishRecording()
+      if (outcome === 'queued') setInfo(QUEUED_MESSAGE)
+      else await refresh()
     } catch {
       setError('Could not save that recording. Check your connection.')
     } finally {
@@ -415,15 +422,124 @@ function OpenVault({ vault }: { vault: VaultSession }) {
   )
 }
 
-export function Vault({ onBack, onExit }: { onBack: () => void; onExit: () => void }) {
+/** With no connection the chain can't be read or extended, but new evidence can still be sealed and held. */
+function OfflineCapture({ publicKey }: { publicKey: string }) {
+  const [note, setNote] = useState('')
+  const [recording, setRecording] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+  const recorder = useRef<ActiveRecorder | null>(null)
+  const recordingStart = useRef('')
+  const fileInput = useRef<HTMLInputElement | null>(null)
+
+  async function hold(envelope: Omit<Envelope, 'v' | 'location'>) {
+    setBusy(true)
+    setError('')
+    setInfo('')
+    try {
+      await queueEvidence(publicKey, { v: 1, location: await readLocationSilently(), ...envelope })
+      setInfo(QUEUED_MESSAGE)
+      return true
+    } catch {
+      setError('Could not save that on this phone.')
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveNote(e: FormEvent) {
+    e.preventDefault()
+    if (!note.trim()) return setError('Write something first.')
+    if (await hold({ type: 'text', text: note.trim(), capturedAt: new Date().toISOString() })) setNote('')
+  }
+
+  async function onPhoto(file: File | undefined) {
+    resumeHideLock()
+    if (fileInput.current) fileInput.current.value = ''
+    if (!file) return
+    if (file.size > MAX_FILE_BYTES) return setError('That photo is over 8 MB, so it was not saved. Try a smaller one.')
+    await hold({ type: 'photo', mime: file.type || 'image/jpeg', data: await blobToBase64(file), capturedAt: new Date().toISOString() })
+  }
+
+  async function toggleRecording() {
+    setError('')
+    if (recorder.current) {
+      const { blob, mime } = await recorder.current.stop()
+      recorder.current = null
+      setRecording(false)
+      await hold({ type: 'audio', mime, data: await blobToBase64(blob), capturedAt: recordingStart.current })
+      return
+    }
+    try {
+      recorder.current = startRecording(await requestMicrophone())
+      recordingStart.current = new Date().toISOString()
+      setRecording(true)
+    } catch {
+      setError("Couldn't use the microphone. Check that it's allowed in your browser's site settings.")
+    }
+  }
+
+  return (
+    <>
+      <p className="muted">
+        You're offline, so your existing entries can't be shown. New evidence is encrypted now and joins your vault when
+        you're back online.
+      </p>
+      {error && <p className="error" role="alert">{error}</p>}
+      {info && <p className="ok" role="status">{info}</p>}
+      <form className="card form" onSubmit={saveNote}>
+        <label>
+          What happened
+          <textarea className="input-text" rows={5} value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? 'Encrypting…' : 'Save note'}
+        </button>
+      </form>
+      <div className="vault-actions">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={busy}
+          onClick={() => {
+            pauseHideLock()
+            fileInput.current?.click()
+          }}
+        >
+          Add photo
+        </button>
+        <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void toggleRecording()}>
+          {recording ? 'Stop and save' : 'Record audio'}
+        </button>
+        <input
+          ref={(el) => {
+            fileInput.current = el
+            el?.addEventListener('cancel', resumeHideLock)
+          }}
+          type="file"
+          accept="image/*"
+          hidden
+          aria-label="Photo file"
+          onChange={(e) => void onPhoto(e.target.files?.[0])}
+        />
+      </div>
+    </>
+  )
+}
+
+export function Vault({ offline, onBack, onExit }: { offline: boolean; onBack: () => void; onExit: () => void }) {
   const [meta, setMeta] = useState<(VaultMeta & { configured: true }) | { configured: false } | null>(null)
   const [vault, setOpenVault] = useState(currentVault)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (vault) return
+    if (vault || offline) return
     api.vaultMeta().then(setMeta).catch(() => setError('Could not reach your vault. Check your connection.'))
-  }, [vault])
+  }, [vault, offline])
+
+  const offlineKey = currentPublicKey()
 
   return (
     <main className="screen">
@@ -433,7 +549,13 @@ export function Vault({ onBack, onExit }: { onBack: () => void; onExit: () => vo
       </button>
       <h1>Evidence vault</h1>
       {error && <p className="error" role="alert">{error}</p>}
-      {vault ? (
+      {offline ? (
+        offlineKey ? (
+          <OfflineCapture publicKey={offlineKey} />
+        ) : (
+          <p className="muted">You don't have a vault on this phone yet. Setting one up needs a connection.</p>
+        )
+      ) : vault ? (
         <OpenVault vault={vault} />
       ) : meta === null ? null : meta.configured ? (
         <UnlockVault meta={meta} onOpen={setOpenVault} />

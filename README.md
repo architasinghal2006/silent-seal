@@ -13,6 +13,8 @@ Hackathon working model. All data is dummy or demo data.
 - **Duress PIN.** Opens an empty app *and* silently fires an SOS. The server response is identical to a real unlock.
 - **Silent by default.** No sounds, toasts, vibration or notifications.
 - **Encryption at rest.** Evidence is encrypted with AES-256-GCM in the browser, with the key derived from a passphrase separate from the PIN. The server stores only ciphertext.
+- **Offline-first.** The app, both PINs, alerts and new evidence all work with no connection, and send when it returns.
+- **Panic wipe.** Holding for 2 seconds clears the phone and leaves a working calculator. Evidence stays on the server unless the survivor separately deletes it.
 - **Quick exit and auto-lock.** Exit button, `Esc`, switching away from the app and 5 minutes idle all return to the calculator and drop the in-memory session.
 
 ## Quick start (local, SQLite)
@@ -107,19 +109,46 @@ The link ends after `LIVE_SHARE_TTL_MINUTES` (default 120) if nobody ends it fir
 - This shows the record is internally consistent. It is not a certified forensic process, and whether a court accepts it is a legal question.
 - Entries are capped at 8 MB. The whole vault downloads each time it opens, so a large vault will be slow on a low-end phone.
 
+## Demo walkthrough (Phase E)
+
+**Install:** run `npm run build && npm run preview`, open http://localhost:4173 in Chrome, and choose **Install**. It appears as "Calculator" with a calculator icon. Service workers only run in the built app, so offline steps won't work under `npm run dev`.
+
+**Offline:** in DevTools > Network, set **Offline** and reload.
+
+1. The calculator still loads and works. A wrong PIN still just shows the number.
+2. The real PIN opens the app with a "You're offline" card. Hold the alert button, and add a note in the vault.
+3. Nothing reaches the dashboard yet. Turn **Offline** off. The alert arrives once, with the location from when it was sent, and the note joins the vault the next time it opens.
+4. Repeat with the duress PIN. It looks the same on the phone, and when back online the dashboard shows a `DURESS` alert.
+
+**Zones:** open **Safe & danger zones**. Tap the map or use your current location, then return to the calculator and change the position under DevTools > Sensors. A change has to hold for two checks, 15 seconds apart, so allow about 30 seconds. Standing near the edge fires nothing, because of the hysteresis margin.
+
+**Panic wipe:** note your recovery code in **Safety settings**, then hold **Hold to wipe this phone**. The app is back to a fresh calculator, and `1379=` shows first-time setup. Choose **I have a recovery code** and enter it with your PIN to get your evidence back.
+
+**Delete from server:** in **Safety settings**, confirm with your PIN. Everything for the account is removed and live map links stop working. Under the duress PIN this only clears the decoy side.
+
+**Limits:**
+
+- **Background:** like live location, zones and the queue only run while the app is open and the phone is awake. A web app can't watch zones or send a queued alert from the background. A native app would be needed for that.
+- **Recovery after a wipe:** a restored phone only has offline unlock for PINs used on it since. Until the duress PIN has been used once online, it won't work offline there.
+- **Short PINs:** someone who copies the phone's browser storage could guess a short PIN offline. Longer PINs help. That storage also shows that an account exists and which zones are watched, though not their names, and queued alerts are stored unencrypted until sent.
+- **Panic wipe:** alerts still waiting to send are lost, and any live map stops updating, warning the contact after 2 minutes. Exported files in Downloads, browser history and server logs are outside what it can clear. The mock adapter writes alert text to the server log, so a real deployment must not log it.
+- **Server data:** zones (name, location and size) and location trails are not encrypted on the server. Only evidence is. "I'm safe" keeps the trail, and only **Delete from server** removes it.
+
 ### How duress stays hidden
 
 - The client cannot tell real from duress, so it behaves the same after every unlock, including sending its location. The server keeps that location only if an SOS is in progress, and discards it after a normal unlock. Its reply just says whether to keep streaming.
 - A duress session sees empty lists and cannot read, edit or delete real contacts. Contacts added under duress are stored as decoys and never receive alerts.
 - A duress session has its own empty vault. Audio clips sent from one are discarded, so they can never be played back by whoever forced the unlock.
+- Offline, each PIN opens one of two identical-looking records holding an opaque token. The phone reports either the same way, and the server decides from the token whether that was a duress unlock.
+- A forced **Delete from server** only clears the decoy side, so evidence can't be destroyed under duress.
 - A duress session cannot see an active share, and "I'm safe" does nothing in one, so a forced unlock cannot cancel an SOS.
 - Alerts tell contacts not to call or text back, and duress alerts warn that someone may be forcing the unlock.
 
 ## Tests
 
 ```bash
-cd backend  && pytest -q        # auth, duress, lockout, contacts, SOS dispatch, adapters, dashboard, live share
-cd frontend && npm test         # calculator engine, vault crypto and hash chain
+cd backend  && pytest -q        # auth, duress, lockout, contacts, SOS dispatch, adapters, dashboard, live share, offline, zones, erase
+cd frontend && npm test         # calculator engine, vault crypto, hash chain, geofence, offline PINs
 ```
 
 ## API
@@ -144,6 +173,11 @@ cd frontend && npm test         # calculator engine, vault crypto and hash chain
 | GET | `/api/vault/head`, `/api/vault/entries` | Chain head and ciphertext entries |
 | POST | `/api/vault/entries` | Append only. Must link to the head and match its hash. |
 | GET, POST, DELETE | `/api/vault/clips` | SOS audio waiting to join the chain. Discarded under duress. |
+| GET, POST | `/api/zones` | The session's own zones, plus an opaque list of real zones for the device's watcher |
+| DELETE | `/api/zones/{id}` | A duress session gets `404` for real zones |
+| POST | `/api/offline/sos`, `/unlocked`, `/clip` | Queued work, using an offline token. Safe to retry. |
+| GET | `/api/offline/token` | For a phone restored with a recovery code |
+| POST | `/api/account/erase` | `{pin}`. Deletes everything, or only the decoy side under duress. |
 | GET | `/api/demo/dashboard`, `/api/demo/alerts` | Demo only. `404` unless `DEMO_DASHBOARD_TOKEN` is set. |
 
 PINs are hashed with scrypt. Both hashes are always checked so response timing does not reveal which PIN matched. The JWT carries an opaque scope (`a`/`b`), never the word "duress".
@@ -152,16 +186,17 @@ PINs are hashed with scrypt. Both hashes are always checked so response timing d
 
 ```
 backend/   FastAPI + SQLAlchemy (SQLite locally, Postgres in Docker)
-  app/routers/       health, auth, contacts, sos, live, vault, demo
-  app/services/      sos capture and dispatch, live shares
+  app/routers/       health, auth, contacts, sos, live, vault, zones, offline, demo
+  app/services/      sos capture and dispatch, live shares, erase
   app/notifications/ mock adapter, SMS and SMTP stubs
   app/share_map.html contact's map, served by the API so the calculator bundle never mentions it
   app/static/        vendored Leaflet 1.9.4
   tools/             verify_bundle.py, checks an export without the app
 frontend/  React + Vite + TS PWA (manifest name "Calculator")
   src/calculator/ eval-free calculator engine + hidden unlock
-  src/screens/    Setup, Home, Contacts, Vault
-  src/lib/        api, device capture (GPS, battery), sos, location stream, crypto, vault, recorder
+  src/screens/    Setup, Home, Contacts, Vault, Zones, Safety
+  src/lib/        api, device capture (GPS, battery), sos, location stream, crypto, vault, recorder,
+                  geofence and watcher, offline queue, offline PIN records, wipe
 ```
 
 ## Roadmap
@@ -170,4 +205,4 @@ frontend/  React + Vite + TS PWA (manifest name "Calculator")
 - [x] **B**: trusted contacts, SOS engine with notification adapters (mock, SMS and email stubs), GPS and battery capture, received-alerts dashboard. SOS audio moves to Phase D, where it can be encrypted.
 - [x] **C**: live location share with expiring link, breadcrumb map, "I'm safe"
 - [x] **D**: client-side encrypted evidence vault, hash chain, export, SOS audio
-- [ ] **E**: geofencing, offline queue, panic wipe, PWA install polish
+- [x] **E**: geofencing, offline queue, panic wipe, PWA install polish
