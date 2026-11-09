@@ -1,0 +1,30 @@
+# Render Blueprint: one web service that serves both the PWA and /api.
+# Deploy: Render dashboard > New > Blueprint > pick this repo.
+# The database is external (Neon free tier) because Render's free Postgres expires after 30 days.
+services:
+  - type: web
+    name: calc-utility          # Becomes calc-utility.onrender.com. Keep it neutral: it shows on the survivor's phone.
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    region: singapore           # Closest Render region to India
+    plan: free                  # Free sleeps after 15 min idle. Switch to "starter" ($7/mo) for the judging window.
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL       # Paste the Neon connection string when prompted
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DEMO_DASHBOARD_TOKEN
+        generateValue: true     # Shown in the dashboard's Environment tab; opens /api/demo/dashboard
+      - key: NOTIFY_ADAPTER
+        value: mock
+      - key: JWT_TTL_MINUTES
+        value: "30"
+      - key: LIVE_SHARE_TTL_MINUTES
+        value: "120"
+      - key: VITE_UNLOCK_SEQUENCE   # Build-time; change it so it differs from the README's 1379
+        sync: false
+      # PUBLIC_BASE_URL is left unset on purpose: the app uses Render's RENDER_EXTERNAL_URL.
+      # CORS_ORIGINS isn't needed: the frontend and API share one origin.

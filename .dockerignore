@@ -1,0 +1,20 @@
+# Build context for the root Dockerfile. Keep secrets and local artifacts out.
+.git
+.env
+.env.*
+!.env.example
+
+**/node_modules
+**/dist
+**/dev-dist
+
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.db
+**/.pytest_cache
+backend/tests
+
+.vscode
+.idea
+.DS_Store

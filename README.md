@@ -47,6 +47,23 @@ docker compose up --build        # API on http://localhost:8000, Postgres in a n
 
 Then run the frontend with `npm run dev` as above. Compose reads `.env` and points `DATABASE_URL` at the `db` service.
 
+## Deploy (Render + Neon)
+
+The root `Dockerfile` builds the PWA and serves it from the backend, so the whole app is one service on one `https://` address. Phones need HTTPS for location, install and offline mode.
+
+1. **Database:** create a free Postgres project at [neon.tech](https://neon.tech), choosing the Singapore region, and copy its connection string (`postgresql://...?sslmode=require`). The backend converts it to the psycopg 3 driver itself.
+2. **Service:** in Render, choose **New > Blueprint** and pick this repo. `render.yaml` sets up the service. When prompted:
+   - `DATABASE_URL`: paste the Neon string.
+   - `VITE_UNLOCK_SEQUENCE`: pick a sequence that isn't the README's `1379`.
+3. **Done:** the app is at `https://<service-name>.onrender.com`. `JWT_SECRET` and `DEMO_DASHBOARD_TOKEN` are generated for you; find the token under the service's **Environment** tab to open `/api/demo/dashboard`. Live-map links use the service URL automatically.
+
+Notes:
+
+- The free plan sleeps after 15 minutes idle and takes about a minute to wake. Switch `plan` to `starter` for the judging window, or open the link a minute before presenting.
+- The service name is part of the URL a survivor's phone would show, so keep it neutral.
+- Live data is demo data only.
+- To run the same image locally: `docker build -t silent-seal . && docker run -p 8000:8000 -e JWT_SECRET=dev silent-seal`, then open http://localhost:8000.
+
 ## Demo walkthrough (Phase A)
 
 1. Open http://localhost:5173. You see a normal calculator. Try `12+3×4=` and you get `24`.
