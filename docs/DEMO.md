@@ -91,4 +91,6 @@ To see duplicate prevention directly, the backend test `test_a_retried_event_tak
 ## What the badges mean
 
 - **Operational** on the dashboard: that part runs for real in this build.
-- **Simulated** or **Sample**: it stands in for something outside this build. Notifications are the main case: the mock adapter records each message and sends nothing, and the app says "Simulated: recorded, not sent" rather than "Sent".
+- **Simulated** or **Sample**: it stands in for something outside this build. Notifications are the main case: by default the mock adapter records each message and sends nothing, and the app says "Simulated: recorded, not sent" rather than "Sent".
+
+To show a real message arriving during the demo, configure email or Twilio as described under **Sending real alerts** in the README. The dashboard's summary then reads "LIVE", and deliveries show **Sent** only when the provider accepts them.

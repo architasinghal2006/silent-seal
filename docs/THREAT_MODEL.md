@@ -109,6 +109,6 @@ It is **not** secure erasure. A web app can't overwrite storage, reach device ba
 
 ## Prototype shortcuts to fix before real use
 
-- SMS and email delivery are stubs. Nothing is actually delivered.
+- Alerts are not delivered unless a provider is configured. Email (SMTP) and SMS (Twilio) are implemented; reliable SMS in India additionally needs DLT sender registration. A provider accepting a message is not confirmation the contact saw it, and message text passes through that provider.
 - Rate limiting and the logout list are in one process's memory or one table, sized for a single small server.
 - No independent security review, penetration test, or review by a domestic-violence service has been done. Both would be essential before any real deployment.

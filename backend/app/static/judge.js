@@ -189,7 +189,9 @@
       $('adapter-note').textContent =
         state.notifications.adapter === 'mock'
           ? 'SMS and email delivery: the mock adapter records each message here and nothing leaves this server.'
-          : `SMS and email delivery: the "${state.notifications.adapter}" adapter is a stub that checks its settings and sends nothing.`
+          : state.notifications.delivers_externally
+            ? `SMS and email delivery: LIVE. The "${state.notifications.adapter}" adapter sends real messages to contacts.`
+            : `SMS and email delivery: the "${state.notifications.adapter}" adapter is selected but not fully configured, so nothing is sent.`
       renderFeed(state.alerts)
       renderOffline(state.offline)
       renderAudit(state.audit)

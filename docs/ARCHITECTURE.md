@@ -101,7 +101,7 @@ entry n:   ciphertext = AES-GCM(key, random 96-bit nonce, envelope, aad = "n|pre
 
 ## Notifications
 
-`NotificationAdapter` has one method, `send`, returning `sent`, `stub` or `failed`. `MockNotificationAdapter` is the default: it records and sends nothing. `SmsAdapter` and `EmailAdapter` are interfaces with stub bodies. Replacing a stub with a provider call is the only change needed to send for real; the adapter's name is stored on every record and shown wherever a delivery is displayed.
+`NotificationAdapter` has one method, `send`, returning `sent`, `stub` or `failed`. `MockNotificationAdapter` is the default: it records and sends nothing. `EmailAdapter` sends over SMTP and `SmsAdapter` sends through Twilio (MSG91 remains a stub); both return `sent` only when the provider accepts the message. `LiveAdapter` routes each contact to the adapter for their channel. The adapter that carried each message is stored on its record and shown wherever a delivery is displayed.
 
 ## Deployment
 

@@ -14,6 +14,8 @@ class DeliveryResult:
     # sent: the adapter handed the message on. stub: a stub ran and sent nothing. failed: not sent.
     status: str
     detail: str | None = None
+    # Set when one adapter hands the message to another, to record which one actually handled it.
+    via: str | None = None
 
 
 class NotificationAdapter(ABC):

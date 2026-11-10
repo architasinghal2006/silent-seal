@@ -54,7 +54,7 @@ cd frontend && npm run build && npm run preview      # http://localhost:4173
 ## Tests
 
 ```bash
-cd backend  && pytest -q       # 227 tests
+cd backend  && pytest -q       # 238 tests
 cd frontend && npm test        # 110 tests
 ```
 
@@ -65,7 +65,7 @@ cd frontend && npm test        # 110 tests
 
 | Operational in this build | Simulated or stubbed |
 |---|---|
-| Calculator, secret sequence, two-PIN unlock, lockout, logout | **SMS and email delivery.** The default `mock` adapter records each message for the judge dashboard and sends nothing. The `sms` and `email` adapters are stubs that check their settings and send nothing. No screen ever shows these as delivered. |
+| Calculator, secret sequence, two-PIN unlock, lockout, logout | **SMS and email delivery, by default.** The default `mock` adapter records each message for the judge dashboard and sends nothing, and the app labels it "Simulated: recorded, not sent". Real delivery is built in and off until configured: see below. |
 | SOS events, location and battery capture | Simulated incoming alerts and their moving trail on the judge dashboard, always labelled. |
 | Live-location links, expiry, "I'm safe" | Sample contacts, zones and history loaded from Settings on a demo server, always labelled. |
 | Client-side AES-256-GCM, PBKDF2-SHA256 (600,000 rounds), hash chain, export, verification | |
@@ -73,6 +73,39 @@ cd frontend && npm test        # 110 tests
 | Quick exit, idle lock, panic wipe | |
 
 **Needs a native app:** location sharing, zone checks and queued sending while the app is closed or the phone is locked; hiding from the app switcher; blocking screenshots; a launcher icon that can't be inspected. See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+
+## Sending real alerts
+
+By default nothing leaves the server. To have contacts actually receive alerts, set these in `.env` (or in Render's **Environment** tab) and restart:
+
+**Email (simplest, free).** With a Gmail account, turn on 2-Step Verification, then create an app password under Google Account > Security > App passwords.
+
+```
+NOTIFY_ADAPTER=live
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=the 16-character app password
+```
+
+**SMS (Twilio).** Create a Twilio account, get a phone number, and on a trial account verify each recipient's number under Phone Numbers > Verified Caller IDs.
+
+```
+NOTIFY_ADAPTER=live
+SMS_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM=+1...        # your Twilio number
+```
+
+`live` reaches each contact by their own channel: SMS contacts through Twilio, email contacts over SMTP. With only one of the two configured, contacts on the other channel show as "Not sent".
+
+Limits worth knowing:
+
+- A message is marked **Sent** when the provider accepts it. That is not proof it reached the phone.
+- A Twilio trial only texts verified numbers and adds a trial prefix to the text.
+- SMS to Indian numbers from an unregistered sender is often blocked by carriers. Reliable SMS in India needs DLT registration of the sender and message template, through a provider such as MSG91 (still a stub here).
+- `PUBLIC_BASE_URL` must be the public address of the server, or the live-map link in the message won't open on the contact's phone. On Render this is set automatically.
 
 ## Project layout
 

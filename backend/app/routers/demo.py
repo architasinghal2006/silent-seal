@@ -22,6 +22,7 @@ from ..schemas.vault import VerifyRequest, VerifyResult
 from ..security import SessionCtx, current_session
 from ..services import demo_seed
 from ..services.live_share import is_active, share_url
+from ..services.notifications import delivers_externally
 from ..services.sos import dispatch_sos
 from ..utils.time import iso_z, utcnow
 from .vault import verify_result
@@ -139,8 +140,8 @@ def state(db: Session = Depends(get_db)) -> dict:
         "server_time": iso_z(utcnow()),
         "notifications": {
             "adapter": settings.notify_adapter,
-            # Only a real provider integration would deliver anything. None is implemented in this build.
-            "delivers_externally": False,
+            # True only when a real provider is selected and fully configured.
+            "delivers_externally": delivers_externally(settings),
         },
         "alerts": _alerts(db),
         "offline": {

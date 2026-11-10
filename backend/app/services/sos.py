@@ -175,7 +175,7 @@ def _dispatch(db: Session, event_id: str, kind: str) -> None:
                 channel=contact.channel,
                 destination=destination or "",
                 kind=kind,
-                adapter=adapter.name,
+                adapter=result.via or adapter.name,
                 status=result.status,
                 detail=result.detail,
                 body=body,

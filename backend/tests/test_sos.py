@@ -163,18 +163,6 @@ def test_contact_added_under_duress_is_a_decoy_that_never_gets_alerts(client, ac
     assert {d.destination for d in _deliveries(_events(account)[-1].id)} == {SMS["phone"]}
 
 
-def test_stub_adapters_never_report_sent():
-    settings = get_settings().model_copy(
-        update={"sms_provider": "msg91", "msg91_auth_key": "dummy", "smtp_host": "h", "smtp_user": "u", "smtp_password": "p"}
-    )
-    assert SmsAdapter(settings).send(Notification("sms", "+91", "x")).status == "stub"
-    assert EmailAdapter(settings).send(Notification("email", "a@b.c", "x")).status == "stub"
-    unconfigured = get_settings().model_copy(update={"sms_provider": "", "smtp_host": ""})
-    assert SmsAdapter(unconfigured).send(Notification("sms", "+91", "x")).status == "failed"
-    assert EmailAdapter(unconfigured).send(Notification("email", "a@b.c", "x")).status == "failed"
-    assert SmsAdapter(settings).send(Notification("email", "a@b.c", "x")).status == "failed"
-
-
 def test_demo_dashboard_requires_token(client, real, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "demo_dashboard_token", "")

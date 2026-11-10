@@ -28,17 +28,21 @@ class Settings(BaseSettings):
     rate_limit_demo: int = 240
     rate_limit_api: int = 600
 
-    # Notification adapter. Mock logs and shows in the judge dashboard; sms and email are stubs.
-    notify_adapter: Literal["mock", "sms", "email"] = "mock"
+    # Notification adapter. mock records messages for the judge dashboard and sends nothing.
+    # sms and email send for real once configured below. live does both, by each contact's channel.
+    notify_adapter: Literal["mock", "sms", "email", "live"] = "mock"
 
-    # SMS stub: msg91 | twilio
+    # SMS: twilio sends for real. msg91 is a stub.
     sms_provider: str = ""
     msg91_auth_key: str = ""
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
+    twilio_from: str = ""  # the Twilio number messages come from, like +15005550006
 
-    # SMTP stub
+    # Email over SMTP. Port 587 uses STARTTLS, 465 uses SSL.
     smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_from: str = ""  # defaults to smtp_user
     smtp_user: str = ""
     smtp_password: str = ""
 
