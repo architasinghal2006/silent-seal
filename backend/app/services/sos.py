@@ -5,14 +5,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db import SessionLocal
-from ..models import Contact, Delivery, LiveShare, Profile, SosEvent, utcnow
-from ..notifications.adapters import Notification, get_adapter
-from .live import ensure_share, share_url
+from ..database import SessionLocal
+from ..models import Contact, LiveShareSession, NotificationRecord, Profile, SosEvent
+from ..utils.time import IST, utcnow
+from . import audit
+from .live_share import ensure_share, share_url
+from .notifications import Notification, get_adapter
 
 log = logging.getLogger("silentseal.sos")
-
-IST = timezone(timedelta(hours=5, minutes=30), "IST")
 
 # How long after an SOS a late location from the device is still attached to it.
 CONTEXT_WINDOW = timedelta(minutes=10)
@@ -20,25 +20,37 @@ CONTEXT_WINDOW = timedelta(minutes=10)
 # Past this, contacts are told the alert was held up, so they don't assume it's happening now.
 DELAY_NOTICE = timedelta(minutes=2)
 
+_ZONE_SENTENCES = {
+    ("danger", "entered"): "entered an area they marked as dangerous",
+    ("danger", "left"): "left an area they marked as dangerous",
+    ("safe", "entered"): "arrived at a place they marked as safe",
+    ("safe", "left"): "left an area they marked as safe",
+}
 
-def record_sos(db: Session, account_id: str, trigger: str, payload: dict | None = None) -> SosEvent:
+
+def record_sos(
+    db: Session, user_id: str, trigger: str, payload: dict | None = None, simulated: bool = False
+) -> SosEvent:
     event = SosEvent(
-        account_id=account_id,
+        user_id=user_id,
         trigger=trigger,
         payload=json.dumps(payload) if payload else None,
+        simulated=simulated,
     )
     db.add(event)
+    audit.record(db, audit.SOS_CREATED, user_id)
     db.commit()
-    ensure_share(db, account_id, event.id)
-    log.warning("SOS queued: event=%s account=%s trigger=%s", event.id, account_id, trigger)
+    ensure_share(db, user_id, event.id)
+    # Ids only: no trigger, so the log never says an unlock was made under duress.
+    log.info("sos recorded: event=%s", event.id)
     return event
 
 
-def attach_context(db: Session, account_id: str, location: dict, battery: float | None) -> str | None:
+def attach_context(db: Session, user_id: str, location: dict, battery: float | None) -> str | None:
     """Add a late location to a recent SOS still missing one. Returns its id, or None if there is none."""
     recent = db.scalars(
         select(SosEvent)
-        .where(SosEvent.account_id == account_id, SosEvent.created_at >= utcnow() - CONTEXT_WINDOW)
+        .where(SosEvent.user_id == user_id, SosEvent.created_at >= utcnow() - CONTEXT_WINDOW)
         .order_by(SosEvent.created_at.desc())
     ).first()
     if recent is None:
@@ -66,6 +78,15 @@ def _delayed_since(event: SosEvent, payload: dict) -> str | None:
     return sent.astimezone(IST).strftime("%d %b %H:%M IST")
 
 
+def _zone_sentence(payload: dict) -> str | None:
+    zone_event = payload.get("zone_event")
+    if not zone_event:
+        return None
+    # Older devices send no zone type: entering then meant a danger zone, leaving a safe one.
+    kind = payload.get("zone_kind") or ("danger" if zone_event == "entered" else "safe")
+    return _ZONE_SENTENCES.get((kind, zone_event))
+
+
 def build_message(event: SosEvent, alert_name: str, kind: str, map_url: str | None = None) -> str:
     payload = json.loads(event.payload) if event.payload else {}
     who = alert_name or "Someone who listed you as a trusted contact"
@@ -76,12 +97,16 @@ def build_message(event: SosEvent, alert_name: str, kind: str, map_url: str | No
 
     if kind == "update":
         lines = [f"Location update for the silent SOS from {who} ({when})."]
+    elif event.trigger == "share":
+        lines = [f"{who} is sharing their live location with you ({when})."]
+        lines.append("Do NOT call or text them unless they ask: it may put them at risk.")
+        if map_url:
+            lines.append(f"Live map, private to you: {map_url}")
     else:
         lines = [f"SILENT SOS from {who} at {when}. They may need help."]
-        zone_event = payload.get("zone_event")
-        if zone_event:
-            place = "entered an area they marked as dangerous" if zone_event == "entered" else "left an area they marked as safe"
-            lines.append(f"Sent automatically: they {place}.")
+        zone_sentence = _zone_sentence(payload)
+        if zone_sentence:
+            lines.append(f"Sent automatically: they {zone_sentence}.")
         if event.trigger == "duress":
             lines.append("They used their duress PIN, so someone may be forcing them to unlock their phone.")
         lines.append("Do NOT call or text them: it may put them at risk.")
@@ -91,6 +116,8 @@ def build_message(event: SosEvent, alert_name: str, kind: str, map_url: str | No
         if map_url:
             lines.append(f"Live map, private to you: {map_url}")
 
+    if event.simulated:
+        lines.insert(0, "[SIMULATED for demonstration]")
     location = payload.get("location")
     if location:
         lat, lng = location["lat"], location["lng"]
@@ -98,29 +125,41 @@ def build_message(event: SosEvent, alert_name: str, kind: str, map_url: str | No
         lines.append(f"Location{accuracy}: https://www.openstreetmap.org/?mlat={lat}&mlon={lng}#map=17/{lat}/{lng}")
     if payload.get("battery") is not None:
         lines.append(f"Phone battery: {round(payload['battery'] * 100)}%.")
-    if kind != "update":
+    if kind != "update" and event.trigger != "share":
         lines.append("If they are in immediate danger, call 112.")
     return "\n".join(lines)
 
 
 def dispatch_sos(event_id: str, kind: str = "initial") -> None:
-    """Send an SOS to the account's real contacts. Runs after the response, so it never raises."""
+    """Send an SOS to the user's real emergency contacts. Runs after the response, so it never raises."""
     try:
         with SessionLocal() as db:
             _dispatch(db, event_id, kind)
     except Exception:
-        log.exception("SOS dispatch failed: event=%s", event_id)
+        log.exception("sos dispatch failed: event=%s", event_id)
+
+
+def emergency_contacts(db: Session, user_id: str, decoy: bool = False) -> list[Contact]:
+    return list(
+        db.scalars(
+            select(Contact)
+            .where(Contact.user_id == user_id, Contact.decoy.is_(decoy), Contact.is_emergency.is_(True))
+            .order_by(Contact.created_at)
+        ).all()
+    )
 
 
 def _dispatch(db: Session, event_id: str, kind: str) -> None:
     event = db.get(SosEvent, event_id)
     if event is None:
         return
-    contacts = db.scalars(
-        select(Contact).where(Contact.account_id == event.account_id, Contact.decoy.is_(False))
-    ).all()
-    profile = db.get(Profile, event.account_id)
-    share = db.scalars(select(LiveShare).where(LiveShare.account_id == event.account_id).order_by(LiveShare.created_at.desc())).first()
+    contacts = emergency_contacts(db, event.user_id)
+    profile = db.get(Profile, event.user_id)
+    share = db.scalars(
+        select(LiveShareSession)
+        .where(LiveShareSession.user_id == event.user_id, LiveShareSession.decoy.is_(False))
+        .order_by(LiveShareSession.created_at.desc())
+    ).first()
     body = build_message(event, profile.alert_name if profile else "", kind, share_url(share.id) if share else None)
     adapter = get_adapter()
 
@@ -130,7 +169,7 @@ def _dispatch(db: Session, event_id: str, kind: str) -> None:
         result = adapter.send(Notification(contact.channel, destination or "", body))
         delivered += result.status == "sent"
         db.add(
-            Delivery(
+            NotificationRecord(
                 sos_event_id=event.id,
                 contact_name=contact.name,
                 channel=contact.channel,
@@ -143,6 +182,6 @@ def _dispatch(db: Session, event_id: str, kind: str) -> None:
             )
         )
 
-    if kind == "initial" or (kind == "update" and delivered):
+    if kind in ("initial", "share") or (kind == "update" and delivered):
         event.status = "no_contacts" if not contacts else "dispatched" if delivered else "undelivered"
     db.commit()

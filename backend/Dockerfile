@@ -9,8 +9,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 
-RUN useradd --create-home appuser
+RUN useradd --create-home appuser && chown appuser /srv
 USER appuser
 
 EXPOSE 8000

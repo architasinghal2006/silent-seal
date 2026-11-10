@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Silent Seal · Judge dashboard</title>
+<link rel="stylesheet" href="/api/assets/pages.css">
+</head>
+<body class="judge">
+<header class="top">
+  <div>
+    <p class="eyebrow">SEVA Challenge 2026 · demonstration environment</p>
+    <h1>Silent Seal judge dashboard</h1>
+    <p class="lede">What the server and a survivor's trusted contacts see. The survivor's phone shows none of this.</p>
+  </div>
+  <div class="legend" aria-label="What the badges mean">
+    <span class="chip chip-live">Operational</span><span>runs for real in this build</span>
+    <span class="chip chip-sim">Simulated</span><span>stands in for outside infrastructure</span>
+  </div>
+</header>
+
+<form id="gate" class="card gate">
+  <label for="token">Demo token</label>
+  <div class="row">
+    <input id="token" type="password" autocomplete="off" placeholder="DEMO_DASHBOARD_TOKEN from .env">
+    <button class="btn btn-primary">Open dashboard</button>
+  </div>
+  <p id="gate-state" class="hint" role="status">Demo data only. Never enable this dashboard on a server holding real data.</p>
+</form>
+
+<main id="board" hidden>
+  <section class="card summary" aria-label="What is real and what is simulated">
+    <div><span class="chip chip-live">Operational</span>
+      <p>Two-PIN unlock and lockout · SOS creation · live-location links and expiry · client-side AES-256-GCM evidence · SHA-256 hash chain and verification · geofence checks · offline queue and duplicate prevention</p></div>
+    <div><span class="chip chip-sim">Simulated</span>
+      <p id="adapter-note">SMS and email delivery: messages are recorded here and never leave this server.</p></div>
+  </section>
+
+  <div class="grid">
+    <section class="col-wide" aria-labelledby="feed-title">
+      <div class="section-head">
+        <h2 id="feed-title">Incoming SOS events</h2>
+        <button id="simulate" type="button" class="btn btn-pink">Simulate incoming SOS</button>
+      </div>
+      <p class="hint">Alerts from every account on this server, newest first. Refreshes every 2 seconds.</p>
+      <p id="feed-state" class="hint" role="status"></p>
+      <div id="feed"></div>
+    </section>
+
+    <div class="col-side">
+      <section class="card" aria-labelledby="auth-title">
+        <h2 id="auth-title">Authentication demonstration <span class="chip chip-live">Operational</span></h2>
+        <p class="hint">Creates a throwaway account, then unlocks it with each PIN through the same public endpoint the app uses.</p>
+        <div class="row">
+          <button id="seed" type="button" class="btn btn-secondary">Create demo account</button>
+          <button id="compare" type="button" class="btn btn-primary" disabled>Unlock with both PINs</button>
+        </div>
+        <dl id="seeded" class="facts" hidden></dl>
+        <div id="auth-result" role="status"></div>
+      </section>
+
+      <section class="card" aria-labelledby="verify-title">
+        <h2 id="verify-title">Evidence verification <span class="chip chip-live">Operational</span></h2>
+        <p class="hint">Choose a bundle exported from the app's vault. It is still encrypted: this checks the hash chain only.</p>
+        <input id="bundle" type="file" accept="application/json,.json" aria-label="Exported evidence bundle">
+        <div class="row">
+          <button id="verify" type="button" class="btn btn-primary" disabled>Verify chain</button>
+          <button id="tamper" type="button" class="btn btn-secondary" disabled>Alter one entry, then verify</button>
+        </div>
+        <div id="verify-result" role="status"></div>
+      </section>
+
+      <section class="card" aria-labelledby="offline-title">
+        <h2 id="offline-title">Offline queue <span class="chip chip-live">Operational</span></h2>
+        <p class="hint">Events phones queued with no connection, as they arrived. A repeat of an event already handled is ignored.</p>
+        <div class="stats">
+          <div><strong id="offline-applied">0</strong><span>events applied</span></div>
+          <div><strong id="offline-dupes">0</strong><span>duplicates ignored</span></div>
+        </div>
+        <table id="offline-table" hidden>
+          <thead><tr><th>Event</th><th>Type</th><th>Waited</th><th>Repeats</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="card" aria-labelledby="audit-title">
+        <h2 id="audit-title">Recent activity</h2>
+        <p class="hint">The server's audit trail. It never records which PIN was used.</p>
+        <ul id="audit" class="audit"></ul>
+      </section>
+    </div>
+  </div>
+</main>
+<script src="/api/assets/judge.js"></script>
+</body>
+</html>

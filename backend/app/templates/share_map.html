@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="origin">
+<title>Private location</title>
+<link rel="stylesheet" href="/api/assets/leaflet.css">
+<link rel="stylesheet" href="/api/assets/pages.css">
+</head>
+<body class="share">
+<header class="share-head">
+  <div class="card">
+    <h1 id="title">Loading location…</h1>
+    <div id="meta" class="share-meta" hidden>
+      <span id="status-chip" class="chip chip-live">Sharing live</span>
+      <span id="since-chip" class="chip chip-neutral"></span>
+      <span id="until-chip" class="chip chip-neutral"></span>
+    </div>
+    <p id="updated" class="share-updated" role="status"></p>
+  </div>
+</header>
+<div id="stale" class="stale" role="alert" hidden></div>
+<div id="map-wrap" class="map-wrap" hidden>
+  <div id="map"></div>
+  <button id="recenter" type="button" class="btn recenter" hidden>Show latest</button>
+</div>
+<section id="ended" class="card ended" hidden>
+  <p id="ended-text"></p>
+</section>
+<footer class="share-foot">
+  <p id="advice">Do not call or text them: it may put them at risk.</p>
+  <a class="call-181" href="tel:181">181 Women’s Helpline</a>
+  <a class="call-112" href="tel:112">Call 112</a>
+</footer>
+<script src="/api/assets/leaflet.js"></script>
+<script src="/api/assets/share.js"></script>
+</body>
+</html>

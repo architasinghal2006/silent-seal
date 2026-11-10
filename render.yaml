@@ -24,7 +24,7 @@ services:
         value: "30"
       - key: LIVE_SHARE_TTL_MINUTES
         value: "120"
-      - key: VITE_UNLOCK_SEQUENCE   # Build-time; change it so it differs from the README's 1379
+      - key: VITE_UNLOCK_SEQUENCE   # Build-time starting sequence for first-time setup. Each survivor then chooses their own.
         sync: false
       # PUBLIC_BASE_URL is left unset on purpose: the app uses Render's RENDER_EXTERNAL_URL.
       # CORS_ORIGINS isn't needed: the frontend and API share one origin.

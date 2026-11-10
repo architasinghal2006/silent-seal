@@ -1,65 +1,39 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Calculator } from './calculator/Calculator'
-import { IDLE_LOCK_MS } from './config'
-import { api, clearToken } from './lib/api'
-import { hideLockPaused } from './lib/guard'
-import { sendUnlockContext } from './lib/sos'
-import { getAccountId } from './lib/storage'
-import { resumeStream } from './lib/stream'
-import { startQueue } from './lib/queue'
-import { clearLocalSession, syncAfterUnlock, unlockOffline } from './lib/session'
-import { lockVault } from './lib/vault'
-import { startWatcher } from './lib/watcher'
-import { wipeDevice } from './lib/wipe'
-import { Contacts } from './screens/Contacts'
-import { Home } from './screens/Home'
-import { Safety } from './screens/Safety'
-import { Setup } from './screens/Setup'
-import { Vault } from './screens/Vault'
-import { Zones } from './screens/Zones'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { startWatcher } from './geolocation/watcher'
+import { useStealthGuards } from './hooks/useStealthGuards'
+import { startQueue } from './offline/queue'
+import { Calculator } from './pages/Calculator'
+import { api } from './services/api'
+import { resumeStream } from './services/liveStream'
+import { syncAfterUnlock, unlockOffline } from './services/session'
+import { sendUnlockContext } from './services/sos'
+import { recordFailure, recordSuccess, unlockAllowed } from './services/unlockThrottle'
+import { lockSession, wipeDevice } from './services/wipe'
+import { getUserId } from './utils/storage'
 
-type View = 'calc' | 'setup' | 'app' | 'contacts' | 'vault' | 'zones' | 'safety'
+// Everything behind the calculator loads only once it is needed, so a phone that is only
+// ever used as a calculator never runs any of it. The service worker keeps these files for offline use.
+const SafetyApp = lazy(() => import('./layouts/SafetyApp'))
+const Onboarding = lazy(() => import('./pages/onboarding/Onboarding'))
 
-/**
- * While anything other than the calculator is visible, return to the calculator on
- * Esc, on the page being hidden (app switch, screen off) and after inactivity.
- */
-function useStealthGuards(active: boolean, lock: () => void) {
-  useEffect(() => {
-    if (!active) return
-    let idle = setTimeout(lock, IDLE_LOCK_MS)
-    const bump = () => {
-      clearTimeout(idle)
-      idle = setTimeout(lock, IDLE_LOCK_MS)
-    }
-    const onKey = (e: KeyboardEvent) => (e.key === 'Escape' ? lock() : bump())
-    const onVisibility = () => document.visibilityState === 'hidden' && !hideLockPaused() && lock()
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('pointerdown', bump)
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearTimeout(idle)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', bump)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [active, lock])
-}
+type Stage = 'calculator' | 'onboarding' | 'app'
 
 export default function App() {
-  const [view, setView] = useState<View>('calc')
-  const [accountId, setAccount] = useState(getAccountId)
+  const [stage, setStage] = useState<Stage>('calculator')
+  const [userId, setUser] = useState(getUserId)
   const [offline, setOffline] = useState(false)
+  const [demo, setDemo] = useState(false)
+  // A fresh router for every unlock, so the app always opens on its home screen.
+  const [unlocks, setUnlocks] = useState(0)
 
   const lock = useCallback(() => {
-    clearToken()
-    lockVault()
-    clearLocalSession()
+    lockSession()
     setOffline(false)
-    setView('calc')
+    setStage('calculator')
   }, [])
 
-  useStealthGuards(view !== 'calc', lock)
+  useStealthGuards(stage !== 'calculator', lock)
+
   useEffect(() => {
     // All silent and with no session: these keep working on the calculator.
     resumeStream()
@@ -69,60 +43,58 @@ export default function App() {
 
   const onPinAttempt = useCallback(
     async (pin: string) => {
-      if (!accountId) return false
-      const result = await api.unlock(accountId, pin)
+      // During a lockout nothing is checked at all, and the calculator just shows the number.
+      if (!userId || !unlockAllowed()) return false
+
+      const result = await api.unlock(userId, pin)
       if (result === 'ok') {
+        recordSuccess()
         sendUnlockContext()
         void syncAfterUnlock(pin).catch(() => undefined)
+        void api.me().then((me) => setDemo(me.demo)).catch(() => undefined)
         setOffline(false)
-        setView('app')
+        setUnlocks((n) => n + 1)
+        setStage('app')
         return true
       }
       if (result === 'offline' && (await unlockOffline(pin))) {
+        recordSuccess()
         setOffline(true)
-        setView('app')
+        setUnlocks((n) => n + 1)
+        setStage('app')
         return true
       }
+      recordFailure()
       return false
     },
-    [accountId],
+    [userId],
   )
 
   const wipe = useCallback(() => {
-    setAccount(undefined)
+    setUser(undefined)
     setOffline(false)
-    setView('calc')
+    setStage('calculator')
     void wipeDevice()
   }, [])
 
   const onSetupDone = useCallback(() => {
-    setAccount(getAccountId())
-    setView('calc')
+    lockSession()
+    setUser(getUserId())
+    setStage('calculator')
   }, [])
 
-  if (view === 'setup') return <Setup onDone={onSetupDone} onExit={lock} />
-  if (view === 'app') {
-    return (
-      <Home
-        offline={offline}
-        onExit={lock}
-        onWipe={wipe}
-        onContacts={() => setView('contacts')}
-        onVault={() => setView('vault')}
-        onZones={() => setView('zones')}
-        onSafety={() => setView('safety')}
-      />
-    )
+  if (stage === 'calculator') {
+    return <Calculator hasAccount={Boolean(userId)} onSetupRequested={() => setStage('onboarding')} onPinAttempt={onPinAttempt} />
   }
-  if (view === 'vault') return <Vault offline={offline} onBack={() => setView('app')} onExit={lock} />
-  if (view === 'zones') return <Zones onBack={() => setView('app')} onExit={lock} />
-  if (view === 'safety') return <Safety onBack={() => setView('app')} onExit={lock} onErased={wipe} />
-  if (view === 'contacts') return <Contacts onBack={() => setView('app')} onExit={lock} />
+
   return (
-    <Calculator
-      hasAccount={Boolean(accountId)}
-      onSetupRequested={() => setView('setup')}
-      onPinAttempt={onPinAttempt}
-    />
+    // Nothing is shown while a screen loads: a spinner here would flash on every unlock.
+    <Suspense fallback={null}>
+      {stage === 'onboarding' ? (
+        <Onboarding onDone={onSetupDone} onExit={lock} />
+      ) : (
+        <SafetyApp key={unlocks} session={{ offline, demo, lock, wipe }} />
+      )}
+    </Suspense>
   )
 }

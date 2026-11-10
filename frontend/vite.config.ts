@@ -1,3 +1,5 @@
+/// <reference types="vitest/config" />
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig, loadEnv } from 'vite'
@@ -9,6 +11,7 @@ export default defineConfig(({ mode }) => {
     envDir: '..',
     plugins: [
       react(),
+      tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'icon-192.png', 'apple-touch-icon.png'],
@@ -17,8 +20,8 @@ export default defineConfig(({ mode }) => {
           name: 'Calculator',
           short_name: 'Calculator',
           description: 'Calculator',
-          theme_color: '#000000',
-          background_color: '#000000',
+          theme_color: '#f7f8f8',
+          background_color: '#f7f8f8',
           display: 'standalone',
           orientation: 'portrait',
           id: '/',
@@ -34,10 +37,16 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           navigateFallbackDenylist: [/^\/api/],
-          globPatterns: ['**/*.{js,css,html,svg,png}'],
+          globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         },
       }),
     ],
+    test: {
+      // Component tests opt in to a browser-like environment with a comment at the top of the file.
+      environment: 'node',
+      setupFiles: ['./src/test/setup.ts'],
+      restoreMocks: true,
+    },
     server: {
       port: 5173,
       proxy: { '/api': { target: env.API_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true } },

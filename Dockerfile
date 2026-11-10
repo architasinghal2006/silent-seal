@@ -11,6 +11,8 @@ RUN npm ci
 COPY frontend/ ./
 # Baked into the browser bundle at build time (not a secret). Render passes service
 # env vars as build args, so setting VITE_UNLOCK_SEQUENCE there overrides this default.
+# The starting sequence for a phone that has not chosen its own yet. Each survivor picks
+# a private one during setup, so this only ever opens first-time setup.
 ARG VITE_UNLOCK_SEQUENCE=1379
 ENV VITE_UNLOCK_SEQUENCE=${VITE_UNLOCK_SEQUENCE}
 RUN npm run build
@@ -28,6 +30,9 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
+# Schema migrations. The app applies them itself on every start.
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./alembic.ini
 COPY --from=frontend /build/frontend/dist ./frontend_dist
 
 # appuser owns /srv so the SQLite fallback (no DATABASE_URL) can write its file.

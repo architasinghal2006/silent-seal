@@ -1,40 +1,72 @@
 """Evidence vault storage. Everything sensitive is encrypted on the device: this only ever sees ciphertext.
 
 Each session stays on its own side, so a duress session has a separate, empty vault and
-can never read, extend or remove the real one.
+can never read, extend or remove the real one. There is no endpoint that edits or deletes
+an evidence entry.
 """
-
-import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..db import get_db
-from ..models import VaultClip, VaultEntry, VaultMeta
-from ..schemas import GENESIS_HASH, VaultClipIn, VaultClipOut, VaultEntryIn, VaultEntryOut, VaultHead, VaultMetaBody, VaultMetaOut
+from ..database import get_db
+from ..models import EvidenceChainEntry, EvidenceClip, EvidenceItem, VaultMeta
+from ..schemas.vault import (
+    BUNDLE_FORMAT,
+    GENESIS_HASH,
+    EvidenceClipIn,
+    EvidenceClipOut,
+    EvidenceIn,
+    EvidenceOut,
+    VaultHead,
+    VaultMetaBody,
+    VaultMetaOut,
+    VerifyRequest,
+    VerifyResult,
+)
 from ..security import SessionCtx, current_session
+from ..services import audit
+from ..services.chain import SCOPE_NOTE, entry_hash, payload_hash, verify_chain
+from ..utils.time import iso_z, utcnow
 
 router = APIRouter(prefix="/api/vault", tags=["vault"])
 
 
-def entry_hash(seq: int, prev_hash: str, iv: str, ciphertext: str) -> str:
-    """Must match entryHash in frontend/src/lib/crypto.ts and tools/verify_bundle.py."""
-    return hashlib.sha256(f"{seq}|{prev_hash}|{iv}|{ciphertext}".encode()).hexdigest()
-
-
 def _meta(db: Session, session: SessionCtx) -> VaultMeta | None:
-    return db.get(VaultMeta, (session.account_id, session.duress))
+    return db.get(VaultMeta, (session.user_id, session.duress))
 
 
 def _head(db: Session, session: SessionCtx) -> VaultHead:
     last = db.scalars(
-        select(VaultEntry)
-        .where(VaultEntry.account_id == session.account_id, VaultEntry.decoy.is_(session.duress))
-        .order_by(VaultEntry.seq.desc())
+        select(EvidenceChainEntry)
+        .where(EvidenceChainEntry.user_id == session.user_id, EvidenceChainEntry.decoy.is_(session.duress))
+        .order_by(EvidenceChainEntry.seq.desc())
     ).first()
     return VaultHead(seq=last.seq, hash=last.entry_hash) if last else VaultHead(seq=0, hash=GENESIS_HASH)
+
+
+def _out(link: EvidenceChainEntry, item: EvidenceItem) -> EvidenceOut:
+    return EvidenceOut(
+        id=item.id,
+        seq=link.seq,
+        prev_hash=link.prev_hash,
+        iv=item.iv,
+        ciphertext=item.ciphertext,
+        payload_hash=link.payload_hash,
+        entry_hash=link.entry_hash,
+        created_at=item.created_at,
+    )
+
+
+def _evidence(db: Session, session: SessionCtx) -> list[EvidenceOut]:
+    rows = db.execute(
+        select(EvidenceChainEntry, EvidenceItem)
+        .join(EvidenceItem, EvidenceItem.id == EvidenceChainEntry.evidence_id)
+        .where(EvidenceChainEntry.user_id == session.user_id, EvidenceChainEntry.decoy.is_(session.duress))
+        .order_by(EvidenceChainEntry.seq)
+    ).all()
+    return [_out(link, item) for link, item in rows]
 
 
 @router.get("/meta", response_model=VaultMetaOut)
@@ -60,7 +92,7 @@ def create_meta(
 ) -> dict[str, bool]:
     if _meta(db, session) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "already configured")
-    db.add(VaultMeta(account_id=session.account_id, decoy=session.duress, **body.model_dump()))
+    db.add(VaultMeta(user_id=session.user_id, decoy=session.duress, **body.model_dump()))
     try:
         db.commit()
     except IntegrityError:
@@ -74,19 +106,15 @@ def get_head(session: SessionCtx = Depends(current_session), db: Session = Depen
     return _head(db, session)
 
 
-@router.get("/entries", response_model=list[VaultEntryOut])
-def list_entries(session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)):
-    return db.scalars(
-        select(VaultEntry)
-        .where(VaultEntry.account_id == session.account_id, VaultEntry.decoy.is_(session.duress))
-        .order_by(VaultEntry.seq)
-    ).all()
+@router.get("/evidence", response_model=list[EvidenceOut])
+def list_evidence(session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)):
+    return _evidence(db, session)
 
 
-@router.post("/entries", response_model=VaultEntryOut, status_code=status.HTTP_201_CREATED)
-def append_entry(
-    body: VaultEntryIn, session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)
-) -> VaultEntry:
+@router.post("/evidence", response_model=EvidenceOut, status_code=status.HTTP_201_CREATED)
+def append_evidence(
+    body: EvidenceIn, session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)
+) -> EvidenceOut:
     """Append-only: there is deliberately no way to edit or delete one entry."""
     if _meta(db, session) is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "vault not configured")
@@ -96,28 +124,98 @@ def append_entry(
     if body.entry_hash != entry_hash(body.seq, body.prev_hash, body.iv, body.ciphertext):
         raise HTTPException(422, "hash mismatch")
 
-    entry = VaultEntry(account_id=session.account_id, decoy=session.duress, **body.model_dump())
-    db.add(entry)
+    now = utcnow()
+    item = EvidenceItem(
+        user_id=session.user_id, decoy=session.duress, iv=body.iv, ciphertext=body.ciphertext, created_at=now
+    )
+    db.add(item)
+    db.flush()
+    link = EvidenceChainEntry(
+        evidence_id=item.id,
+        user_id=session.user_id,
+        decoy=session.duress,
+        seq=body.seq,
+        prev_hash=body.prev_hash,
+        payload_hash=payload_hash(body.iv, body.ciphertext),
+        entry_hash=body.entry_hash,
+        created_at=now,
+    )
+    db.add(link)
+    if not session.duress:
+        audit.record(db, audit.EVIDENCE_ADDED, session.user_id)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "not at chain head")
-    return entry
+    return _out(link, item)
 
 
-@router.get("/clips", response_model=list[VaultClipOut])
+@router.get("/export")
+def export_bundle(session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)) -> dict:
+    """The whole vault as one self-describing file: ciphertext plus what is needed to check the chain.
+
+    Still encrypted. It can be verified with tools/verify_bundle.py, and only opened with the passphrase.
+    """
+    meta = _meta(db, session)
+    if meta is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "vault not configured")
+    entries = _evidence(db, session)
+    return {
+        "format": BUNDLE_FORMAT,
+        "exported_at": iso_z(utcnow()),
+        "kdf": {"name": "PBKDF2-SHA256", "salt": meta.salt, "iterations": meta.iterations},
+        "cipher": "AES-256-GCM",
+        "verifier": {"iv": meta.verifier_iv, "ciphertext": meta.verifier_ct},
+        "entries": [
+            {
+                "id": e.id,
+                "seq": e.seq,
+                "prev_hash": e.prev_hash,
+                "iv": e.iv,
+                "ciphertext": e.ciphertext,
+                "payload_hash": e.payload_hash,
+                "entry_hash": e.entry_hash,
+                "created_at": iso_z(e.created_at),
+            }
+            for e in entries
+        ],
+        "head_hash": entries[-1].entry_hash if entries else GENESIS_HASH,
+        "count": len(entries),
+    }
+
+
+def verify_result(bundle: dict) -> VerifyResult:
+    problems = verify_chain(bundle)
+    entries = bundle.get("entries") if isinstance(bundle, dict) else None
+    return VerifyResult(
+        valid=not problems,
+        count=len(entries) if isinstance(entries, list) else 0,
+        head_hash=bundle.get("head_hash") if isinstance(bundle.get("head_hash"), str) else None,
+        problems=problems,
+        scope=SCOPE_NOTE,
+    )
+
+
+@router.post("/verify", response_model=VerifyResult)
+def verify_bundle(body: VerifyRequest, _: SessionCtx = Depends(current_session)) -> VerifyResult:
+    """Checks an exported bundle exactly as given. Nothing in it is trusted, stored or compared to the server's copy."""
+    return verify_result(body.bundle)
+
+
+@router.get("/clips", response_model=list[EvidenceClipOut])
 def list_clips(session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)):
-    return db.scalars(
-        select(VaultClip)
-        .where(VaultClip.account_id == session.account_id, VaultClip.decoy.is_(session.duress))
-        .order_by(VaultClip.created_at)
+    clips = db.scalars(
+        select(EvidenceClip)
+        .where(EvidenceClip.user_id == session.user_id, EvidenceClip.decoy.is_(session.duress))
+        .order_by(EvidenceClip.created_at)
     ).all()
+    return [EvidenceClipOut(id=c.id, iv=c.iv, ciphertext=c.ciphertext, wrapped_key=c.wrapped_key) for c in clips]
 
 
 @router.post("/clips", status_code=status.HTTP_201_CREATED)
 def add_clip(
-    body: VaultClipIn, session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)
+    body: EvidenceClipIn, session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)
 ) -> dict[str, bool]:
     """Audio captured during an SOS, sealed to the vault's public key while the vault is locked.
 
@@ -128,7 +226,7 @@ def add_clip(
         return {"accepted": True}
     if _meta(db, session) is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "vault not configured")
-    db.add(VaultClip(account_id=session.account_id, decoy=session.duress, **body.model_dump()))
+    db.add(EvidenceClip(user_id=session.user_id, decoy=session.duress, **body.model_dump()))
     db.commit()
     return {"accepted": True}
 
@@ -137,8 +235,9 @@ def add_clip(
 def delete_clip(
     clip_id: str, session: SessionCtx = Depends(current_session), db: Session = Depends(get_db)
 ) -> Response:
-    clip = db.get(VaultClip, clip_id)
-    if clip is None or clip.account_id != session.account_id or clip.decoy != session.duress:
+    """Removes a clip from the holding area once the device has moved it into the chain."""
+    clip = db.get(EvidenceClip, clip_id)
+    if clip is None or clip.user_id != session.user_id or clip.decoy != session.duress:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     db.delete(clip)
     db.commit()

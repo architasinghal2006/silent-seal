@@ -21,7 +21,14 @@ class Settings(BaseSettings):
     max_failed_attempts: int = 5
     lockout_seconds: int = 60
 
-    # Notification adapter. Mock logs and shows in the demo dashboard; sms and email are stubs.
+    # Requests allowed per client in each window. 0 turns a limit off.
+    rate_limit_window_seconds: int = 60
+    rate_limit_auth: int = 30
+    rate_limit_share_link: int = 120
+    rate_limit_demo: int = 240
+    rate_limit_api: int = 600
+
+    # Notification adapter. Mock logs and shows in the judge dashboard; sms and email are stubs.
     notify_adapter: Literal["mock", "sms", "email"] = "mock"
 
     # SMS stub: msg91 | twilio
@@ -39,7 +46,7 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     live_share_ttl_minutes: int = 120
 
-    # Received-alerts demo dashboard. Empty disables it (404). Never enable with real data.
+    # Judge dashboard and demo tools. Empty disables all of them (404). Never enable with real data.
     demo_dashboard_token: str = ""
 
     # Folder holding the built frontend (`vite build` output). Set in the single-service
@@ -63,6 +70,10 @@ class Settings(BaseSettings):
         if "public_base_url" not in self.model_fields_set and render_url:
             self.public_base_url = render_url
         return self
+
+    @property
+    def demo_enabled(self) -> bool:
+        return bool(self.demo_dashboard_token)
 
     @property
     def frontend_dist_path(self) -> Path | None:
