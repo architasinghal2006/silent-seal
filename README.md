@@ -1,6 +1,6 @@
 # Silent Seal
 
-A covert personal-safety app for domestic-abuse survivors who may be living with the person threatening them. It installs and opens as a working **calculator**. A secret sequence and a PIN reveal the real app, where the survivor alone controls silent SOS alerts, live location sharing and an encrypted evidence vault.
+A covert personal-safety phone app for domestic-abuse survivors who may be living with the person threatening them. It installs and opens as a working **calculator**. A secret sequence and a PIN reveal the real app, where the survivor alone controls silent SOS alerts, live location sharing and an encrypted evidence vault.
 
 Built for the SEVA Challenge 2026 as a working model. All data is demo data.
 
